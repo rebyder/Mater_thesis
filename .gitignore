@@ -17,5 +17,6 @@ venv/
 codeql-cl/
 codeql_db/
 
+#File with openAI key
 .env
 *.env
