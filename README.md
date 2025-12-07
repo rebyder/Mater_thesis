@@ -1,4 +1,4 @@
-# Software vulnerability detection through Agentic Architecture and CodeQL queries
+# Software vulnerability detection through an Agent-based Architecture and CodeQL queries
 
 This is a Master's thesis project that aims to develop an agent-based architecture for generating new, more accurate and predictive CodeQL queries. 
 CodeQL queries, written in .ql files, are used by the CodeQL SAST tool to analyze source code and detect potential vulnerabilities. 
