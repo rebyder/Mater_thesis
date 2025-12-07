@@ -240,7 +240,7 @@ class WebSearchTool(BaseModel):
 
 class WriteQueryTool(BaseModel):
     """
-    Tool to generate CodeQL query for a givrn CWE.
+    Tool to generate CodeQL query for a given CWE.
     
     Args:
         name_query (str): name of the query file
