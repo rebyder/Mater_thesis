@@ -31,6 +31,7 @@ where "CODEQL_CLI" is the command to invoke CodeQL CLI, "CODEQL_DB_PATH" the pat
 where "queries_to_run" are the eventual new queries that will be crated for the other agents, "format=sarifv2.1." is the output report format and "output" is the path to it.
 - the agent calls the ParseSarifTool to parse the sarif report in a way much more understandable for the LLMs.
 - note: the Analyzer agent is not a ReAct agent because it doesn't reason but just invokes the necessary tools.
+
 ### **3. Suggestor Agent**
 The Suggest Agent, a ReAct agent, takes the output of the Analyzer, studies the vulnerablities contained in it and reasons about some suggestions to create new, more accurate and predictive CodeQL queries. It does not create proper code for the queries but just suggestions to facilitate the Creator Agent's job.
 It can call this tools:
@@ -47,6 +48,8 @@ Tool it can use:
 The output is a simple message of success.
 
 An example of the exact line-by-line output produced when running the code is contained in the "result.txt" file.
+
+---
 
 ## Installation
 Ensure to have `codeql` installed on your machine. You can do that through this link:
@@ -67,7 +70,7 @@ Export the OpenAI API key
 echo "OPENAI_KEY=PUT_YOUR_API_KEY_HERE" >> .env
 ```
 
-Install the necessary requirements contained in the 'requirements.txt' file:
+Install the necessary requirements contained in the "requirements.txt" file:
 ```
  pip install -r requirements.txt
 ```
