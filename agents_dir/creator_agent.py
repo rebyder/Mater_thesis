@@ -4,7 +4,7 @@ Module that implements the CreatorAgent, the final stage of the multi-agent pipe
 The CreatorAgent:
     - receives the final report produced by the SuggestorAgent
     - identifies all targeted CWEs that require CodeQL query generation
-    - iteratively produces one `.ql`file per CWE using reasoning steps and tool invocations (WriteQueryTool and FinishTool)
+    - iteratively produces one `.ql` file per CWE using reasoning steps and tool invocations (WriteQuerySubAgent and FinishTool)
 
 Main components:
     - CreatorInput: input model containing the final report of the SuggestorAgent
@@ -15,7 +15,7 @@ Main components:
 Workflow:
     1. Summarizing of memory and instructions
     2. Generation of though to decide the next action
-    3. Tool-based action execution (WriteQueryTool or FinishTool)
+    3. Tool-based action execution (WriteQuerySubAgent or FinishTool)
     4. Tracking of processed CWEs until all queries are created.
 
 """
@@ -52,23 +52,23 @@ class CreatorOutput(BaseTaskInput):
 
 class CreatorAgent(BaseAgent):
     """
-    ReAct Agent that has the main role of generating new CodeQL `.ql`files based on the
+    ReAct Agent that has the main role of generating new CodeQL `.ql` files based on the
     report from the SuggestorAgent and the list of targeted CWEs.
 
     The Agent:
         - reads the last observation and updates the shared memory
         - summarized context and task state usinig SummaryProcedure
         - decides the next step with ThoughtProcedure
-        - executes an action with ActionProcedure (WriteQueryTool and FinishTool)
+        - executes an action with ActionProcedure (WriteQuerySubAgent and FinishTool)
         - executes the tool and converts its output into the next observation
     
     Args: 
         shared_memory (SharedMemory): memory shared among agents
         tools (list): available tools to call when needed
         logpath (str| None=None): file path where logs are saved
-        prompt_template (str): a template string for formatting the agent's prompt.
         
     Attributes:
+        prompt_template (str): a template string for formatting the agent's prompt.
         summ_procedure (SummaryProcedure): summary procedure
         thought_procedure (ThoughtProcedure): reasoning procedure
         action_procedure (ActionProcedure): action procedure
@@ -105,7 +105,6 @@ class CreatorAgent(BaseAgent):
         self.processed_cwes : Set[str] = set()
 
 
-
     def reset(self, task_input: BaseTaskInput):
         """
         Resets the agent state for a new task.
@@ -118,24 +117,23 @@ class CreatorAgent(BaseAgent):
 
         Args:
             task_input (CreatorInput): task input.
-
         """
+
         super().reset(task_input)
         if isinstance(task_input, CreatorInput):
-            self.report = task_input.final_report
+            
+            clean_report = task_input.final_report.replace('"', "'")
+            self.report = clean_report
             target_cwes = self.shared_memory.get_data("target_cwes", []) 
             self.all_cwes = set(target_cwes)  
             self.processed_cwes.clear()
 
             self.last_step.observation = (
-                f"NEW TASK: Generate CodeQL .ql files for each CWE in this report.\n\n"
-                f"REPORT:\n{task_input.final_report}\n\n"
-                f"INSTRUCTION: The full set of target CWEs is: {', '.join(sorted(self.all_cwes))}. "
-                f"Compare this set with the 'Processed CWEs' in your system prompt to decide the next action. "
-                f"Generate one .ql file per CWE using WriteQueryTool until all are processed."
+                f"NEW task: generate CodeQL queries for the following CWEs: {', '.join(self.all_cwes)}. "
+                f"Report: {self.report}."
             )
+            
               
-
     def step(self, observation: str) -> ReActChain:
         """
         Executes a single reasoning-action step using the ReAct pattern.
@@ -182,7 +180,7 @@ class CreatorAgent(BaseAgent):
         
         Workflow:
             - iteratively run reasoning steps up to max_steps.
-            - on each step, detect which tool was selected (WriteQueryTool or FinishTool).
+            - on each step, detect which tool was selected (WriteQuerySubAgent or FinishTool).
             - handles erorrs such as duplicate CWE attempts.
         
         Returns:
@@ -190,19 +188,18 @@ class CreatorAgent(BaseAgent):
 
         Raises:
             TimeoutError: if the agent exceed max_steps.
-          
         """
+
         available_tools = {tool.__name__: tool for tool in self.tools}
         last_observation = self.last_step.observation
 
+        print("[Creator]: ")
         for step in range(self.max_steps):
             current_reasoning = self.step(last_observation)
             current_action = current_reasoning.action
 
             if not current_action:
-                last_observation = (
-                f"ERROR: No valid action (likely duplicate CWE attempt). "
-                f"Processed CWEs so far: {', '.join(sorted(self.processed_cwe))}. "
+                last_observation = (f"ERROR: No valid action. Processed CWEs until now: {', '.join(sorted(self.processed_cwes))}. "
                 f"Choose a different CWE or call FinishTool if all are done."
                 )
                 print(f"Observation: {last_observation}\n")
@@ -217,45 +214,22 @@ class CreatorAgent(BaseAgent):
             if action_name == "FinishTool":
                 return CreatorOutput(final_message="Files created, goal reached!")
 
-            if action_name == "WriteQueryTool":
-                cwe = getattr(current_action, "cwe", "")
-                if cwe in self.processed_cwes:
-                    last_observation = (
-                        f"ERROR: {cwe} was ALREADY processed. Action BLOCKED. "
-                        f"Processed: {', '.join(self.processed_cwes)}. "
-                        f"Choose a different CWE or call FinishTool."
-                    )
-                    print(f" {last_observation}\n")
-                    self.update_memory(last_observation)
-                    continue  
-
-
             if action_name in available_tools:
                 try:
                     result = available_tools[action_name](**current_action.dict()).run(self.llm)
-                    print(f"Result: {result}")
-
-                    if action_name == "WriteQueryTool":
-                        cwe = getattr(current_action, "cwe", "")
-                        self.processed_cwes.add(cwe)
-                        file_name = getattr(current_action, "name_query", None)
-                        #self.created_files[cwe] = file_name
-                        last_observation = f"Registered: {cwe} into {file_name}"
-                        print(last_observation)
+                    if "ERROR" in result:
+                        last_observation = f"The query failed (Exit 2). Error details: {result}. You MUST now use WebSearchTool to find a valid CodeQL Python at this web site `https://codeql.github.com/docs/writing-codeql-queries/`." 
                     else:
-                        last_observation = f"Result: {result}"
-                        print(last_observation)
-
+                        if hasattr(current_action, "cwe"):
+                            self.processed_cwes.add(current_action.cwe)
+                        last_observation = result
 
                 except Exception as e:
                     last_observation = f"Error during {action_name}: {e}"
                     print(last_observation)
 
-            else:
-                last_observation = f"Unknown action: {action_name}"
-                print(last_observation)
-            
-            self.update_memory(last_observation)
-                
+            print(f"Step {step} - Action: {action_name} - Result: {result}\n")
+            self.last_step.observation = result
+            self.update_memory(self.last_step.observation)
 
         raise TimeoutError(f"Creator exceeded max steps ({self.max_steps})")

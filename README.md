@@ -35,7 +35,7 @@ where "queries_to_run" are the eventual new queries that will be crated for the 
 - note: the Analyzer agent is not a ReAct agent because it doesn't reason but just invokes the necessary tools.
 
 ### **4. Suggestor Agent**
-The Suggest Agent, a ReAct agent, takes the output of the Analyzer, studies the vulnerablities contained in it and reasons about some suggestions to create new, more accurate and predictive CodeQL queries. It does not create proper code for the queries but just suggestions to facilitate the Creator Agent's job.
+The Suggest Agent, a ReAct agent, takes the output of the Analyzer, studies the vulnerablities contained in it and reasons about some suggestions to create new, more accurate and predictive CodeQL queries. rIt does not create proper code for the queries but just suggestions to facilitate the Creator Agent's job.
 It can call this tools:
 - WebSearchTool: for web searching if the agent requires some insights about vulnerabilities or CodeQL queries
 - SuggestTool: tool to generate a detection plan for a new CodeQL query

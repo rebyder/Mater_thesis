@@ -1,10 +1,9 @@
 """ 
-Module that defines the SuggestorAgent, a ReAct agent that reads the Analyzer Agent's results (SARIF report), 
+Module that defines the SuggestorAgent, a ReAct agent that reads the Analyzer Agent's results, 
 identifies the detected vulnerabilities and creates:
-
     - a detailed report
     - suggestions for new improved and predictive CodeQL queries
-    - structured reasonings (summaty -> thought -> action)
+    - structured reasonings (summary -> thought -> action)
 
 Contains:
     - SuggestorInput: input task for the SuggestorAgent
@@ -21,6 +20,7 @@ Main functionalities:
 import json
 import os
 from tools import ExistingQuery
+from typing import List, Set
 
 from pydantic import Field
 from agents_dir.base_agent import BaseAgent, ReActChain, SharedMemory, BaseTaskInput
@@ -28,7 +28,7 @@ from prompts import SYSTEM_SUGGESTOR, SUMMARY_TEMPLATE, THOUGHT_TEMPLATE, ACTION
 from procedures.summ_procedure import SummaryProcedure
 from procedures.action_procedure import ActionProcedure
 from procedures.tought_procedure import ThoughtProcedure
-from typing import List, Set
+from config import OUTPUT_QUERIES_PATH
 
 
 QUERY_PACK_TOT = "/Users/rebeccaderosa/.codeql/packages/codeql/python-queries/1.6.8/Security"
@@ -48,7 +48,7 @@ class SuggestorInput(BaseTaskInput):
     SuggestorAgent input.
     
     Args:
-        report_content (str): SARIF report content created by the Analyzer Agent.
+        report_content (str): report content created by the Analyzer Agent.
     """
     report_content: str = Field(...)
 
@@ -77,16 +77,16 @@ class SuggestorAgent(BaseAgent):
         shared_memory (SharedMemory): memory shared among agents
         tools (list): available tools to call when needed
         logpath (str| None=None): file path where logs are saved
-        prompt_template (str): A template string for formatting the agent's prompt.
         
     Attributes:
+        prompt_template (str): A template string for formatting the agent's prompt.
         summ_procedure (SummaryProcedure): summary procedure
         thought_procedure (ThoughtProcedure): reasoning procedure
         action_procedure (ActionProcedure): action procedure
         max_steps (int): maximum number of reasoning steps
         processed_cwe (Set[str]): already processed CWEs in order to avoid duplicants
         report_items (List[dict]): structures list of SARIF elements
-        generated_queries (dict): generated queries per CWE
+        all_actions (list): all actions performed at each step from the suggestor for each vulnerability
     
     Methods:
         reset(task_input): resets the agent state for a new task
@@ -119,7 +119,8 @@ class SuggestorAgent(BaseAgent):
         self.max_steps=20
         self.processed_cwes: Set[str] = set()
         self.report_items: List[dict] = []
-        self.generated_queries = {}
+
+        self.all_actions = []
         
        
 
@@ -139,6 +140,7 @@ class SuggestorAgent(BaseAgent):
             self.report_items = json.loads(task_input.report_content)
             self.last_step.observation=task_input.report_content
             self.processed_cwes.clear()
+            self.all_actions = []
    
     def load_existing_queries(self, cwe: str):
         """
@@ -171,6 +173,19 @@ class SuggestorAgent(BaseAgent):
                         })
                 except Exception:
                     continue
+
+        if os.listdir(OUTPUT_QUERIES_PATH):
+            for file in os.listdir(OUTPUT_QUERIES_PATH):
+                if file.endswith(".ql"):
+                    try:
+                        with open(file, "r") as f:
+                            queries.append({
+                                "filename": file,
+                                "content": f.read()
+                            })
+                    except Exception:
+                        continue
+
 
         return queries
 
@@ -207,14 +222,30 @@ class SuggestorAgent(BaseAgent):
         action_out = self.action_procedure.run(summary, scratchpad, self.last_step, thought, self.tools)
         action = action_out.action
 
-        # if the Agent decides to use SuggestTool the processed_cwes list is updated and existing queries are added
-        if action.__class__.__name__ == "SuggestTool":
+        if action.__class__.__name__ == "SuggestSubAgent":
             cwe = getattr(action, "cwe", None)
             if cwe:
                 self.processed_cwes.add(cwe)
                 inspiration_queries = self.load_existing_queries(cwe)
                 action.existing_queries = [ExistingQuery(**q) for q in inspiration_queries]
-                thought += f"\nProcessed {cwe} with SuggestTool using {len(inspiration_queries)} queries as ispiration."
+                aggregated_audits = []
+                aggregated_contexts = []
+                for item in self.report_items:
+                    if item.get("cwe") == cwe:
+                        audit = item.get("agent_validation")
+                        if audit:
+                            aggregated_audits.append(audit)
+                        
+                        for loc in item.get("locations", []):
+                            code_context = loc.get("full_file")
+                            if code_context and code_context not in aggregated_contexts:
+                                aggregated_contexts.append(code_context)
+
+                action.validation_audit = aggregated_audits
+                action.code_contexts = aggregated_contexts
+
+                # the suggestor needs to aggreagate all the validation audits for each vulnerability in order to generate a complete report for unique vulnerability
+                thought += (f"\nAggregated {len(aggregated_audits)} audits and {len(aggregated_contexts)} code contexts for CWE {cwe}.")
 
         self.last_step = ReActChain.format(summary=summary, thought=thought, action=action)
         return self.last_step
@@ -236,8 +267,9 @@ class SuggestorAgent(BaseAgent):
             TimeoutError: if the agent exceed max_steps.
         """
 
+        print("[Suggestor]: ")
         last_observation = self.last_step.observation
-        available_tools = {tool.__name__: tool for tool in self.tools}
+        available_tools = {tool.__name__: tool for tool in self.tools} # WebSearchTool, SuggestSubAgent, FinishToolSuggestor
 
         for step in range(self.max_steps):
 
@@ -252,21 +284,35 @@ class SuggestorAgent(BaseAgent):
             
             action_name = current_action.__class__.__name__
 
+            pending_cwe = set(item.get("cwe") for item in self.report_items if item.get("cwe")) - self.processed_cwes # unique cwes left to analyze
+            if pending_cwe and action_name not in ("SuggestSubAgent", "WebSearchTool"):
+                last_observation = f"Pending CWE {pending_cwe}. You must generate a detection plan using SuggestSubAgent or find more information about recent CodeQL documentation with  WebSearchTool."
+                self.update_memory(last_observation)
+                print(f"\n[{step}] Thought: {current_reasoning.thought}\n")
+                continue
+
             print(f"\n[{step}] Thought: {current_reasoning.thought}\n")
             print(f"Action: {action_name}\n")
 
-            if action_name=="FinishToolSuggestor":
-                final_report=getattr(current_action, "final_report", "No report generated")
-                self.shared_memory.set_data("target_cwes", list(self.processed_cwes)) 
-                return SuggestorOutput(final_report=final_report)
-             
-        
+            if action_name == "FinishToolSuggestor":
+                # aggregate all the output (reports) of each step
+                full_report = "\n\n".join(self.all_actions)
+                self.shared_memory.set_data("target_cwes", list(self.processed_cwes)) # save the list of cwes processed in the memory
+                return SuggestorOutput(final_report=full_report)  
+            
             if action_name in available_tools:
                 try:
                     result = available_tools[action_name](**current_action.dict()).run(self.llm)
-                    last_observation = f"\nResult: {result}"
-                    print(last_observation)
-                 
+                    if action_name=="SuggestSubAgent":
+                        self.all_actions.append(result)
+                        cwe = getattr(current_action, 'cwe', 'unknown')
+                        last_observation = f"\nSUCCESS: Detection plan for {cwe} successfully generated and stored.\n"
+                    else:
+                        last_observation = f"\nResult: {result}"
+
+                    print("Result: ", result)
+
+
                 except Exception as e:
                     last_observation = f"\nError during {action_name} tool: {e}"
             

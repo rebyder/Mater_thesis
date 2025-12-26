@@ -5,3 +5,5 @@ pydantic
 python-dotenv
 IPython
 ddgs
+bs4
+html2text

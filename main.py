@@ -31,7 +31,6 @@ def main():
 
     script_directory = os.path.dirname(os.path.abspath(__file__))
     json_file_path = os.path.join(script_directory, "vulnerable_code")
-    
 
     parser.add_argument("--dataset_path", type=str, default=json_file_path, help="Path to the dataset JSON file containing the vulnerable-at-source-code files.")
     parser.add_argument("--memory_path", type=str, default="agent_memory.json", help="Path to the shared memory JSON file.")
