@@ -1,0 +1,152 @@
+[
+  {
+    "tool": "CodeQL",
+    "rule_id": "py/stack-trace-exposure",
+    "message": "[Stack trace information](1) flows to this location and may be exposed to an external user.",
+    "locations": [
+      {
+        "uri": "simple_where_clause_injection.py",
+        "line": 50,
+        "full_file": "\"\"\"\nExample 1 \u2013 Simple WHERE-clause SQL injection (University student portal)\n\nThis Flask endpoint checks student login credentials against a MySQL database.\nIt is vulnerable because it directly interpolates the `student_id` into the\nWHERE clause of the SQL query using string concatenation.\n\"\"\"\n\nimport pymysql\nfrom flask import Flask, request, session\n\napp = Flask(__name__)\napp.secret_key = \"dev-secret-key\"\n\n\n@app.route(\"/student/login\", methods=[\"POST\"])\ndef student_login():\n    \"\"\"Authenticate a student by ID and PIN.\n\n    SQL injection vulnerability:\n    - `student_id` from the request is concatenated directly into the SQL string.\n    - An attacker can inject arbitrary SQL into the WHERE clause.\n    \"\"\"\n    db = None\n    try:\n        student_id = request.form.get(\"student_id\", \"\")\n        pin = request.form.get(\"pin\", \"\")\n\n        db = pymysql.connect(\n            host=\"localhost\", user=\"root\", passwd=\"\", db=\"university\"\n        )\n        cursor = db.cursor()\n\n        # VULNERABLE: untrusted student_id concatenated into the query\n        query = (\n            \"SELECT * FROM students \"\n            \"WHERE student_id = '\" + student_id + \"' AND pin = %s\"\n        )\n\n        cursor.execute(query, (pin,))\n        row = cursor.fetchone()\n\n        if row:\n            session[\"student_id\"] = student_id\n            return \"Student login successful\"\n        else:\n            return \"Invalid student ID or PIN\", 401\n\n    except Exception as exc:\n        return f\"Error: {exc}\", 500\n    finally:\n        if db is not None:\n            db.close()\n"
+      }
+    ],
+    "cwe": "CWE-209",
+    "cwe_description": "Exposure of Sensitive Information to an Unauthorized Actor through Stack Trace.",
+    "agent_validation": "The validation of the new vulnerability regarding stack trace exposure has been completed. The existing CodeQL query for stack trace exposure correctly identifies the vulnerability in the provided code snippet. The flow of sensitive information to external users is accurately captured, confirming that the reported vulnerability is a true positive. The audit summary indicates that the CodeQL query is effective in detecting this type of exposure, and no additional vulnerabilities were identified in this specific context."
+  },
+  {
+    "tool": "CodeQL",
+    "rule_id": "py/sql-injection",
+    "message": "This SQL query depends on a [user-provided value](1).",
+    "locations": [
+      {
+        "uri": "identifier_injection.py",
+        "line": 41,
+        "full_file": "\"\"\"\nExample 6 \u2013 Identifier (table/column) SQL injection (Multi-tenant analytics)\n\nThis Flask endpoint lets an admin query different tenant metrics tables.\nIt is vulnerable because the `dataset` parameter is used directly as a table\nname, allowing injection of arbitrary identifiers and SQL.\n\"\"\"\n\nimport psycopg2\nfrom flask import Flask, request, jsonify\n\napp = Flask(__name__)\n\n\n@app.route(\"/metrics\")\ndef get_metrics():\n    \"\"\"Fetch aggregated metrics from a dynamically chosen table.\n\n    SQL injection vulnerability:\n    - `dataset` is interpolated into the FROM clause as a table name.\n    - Attackers can choose arbitrary tables or inject further SQL.\n    \"\"\"\n    dataset = request.args.get(\"dataset\", \"visits\")\n\n    conn = psycopg2.connect(\n        dbname=\"analytics\",\n        user=\"analytics_user\",\n        password=\"secret\",\n        host=\"localhost\",\n    )\n    try:\n        cur = conn.cursor()\n\n        # VULNERABLE: dataset used directly as identifier\n        query = (\n            f\"SELECT date, total_users, active_users \"\n            f\"FROM tenant_{dataset}_daily_summary \"\n            f\"ORDER BY date DESC LIMIT 30\"\n        )\n\n        cur.execute(query)\n        rows = cur.fetchall()\n        return jsonify(\n            [\n                {\n                    \"date\": str(r[0]),\n                    \"total_users\": r[1],\n                    \"active_users\": r[2],\n                }\n                for r in rows\n            ]\n        )\n    finally:\n        conn.close()\n"
+      }
+    ],
+    "cwe": "CWE-89",
+    "cwe_description": "SQL Injection occurs when an application includes untrusted data in a SQL query without proper validation or escaping.",
+    "agent_validation": "The validation of the new SQL injection vulnerability has been completed. The existing CodeQL query for SQL injection correctly identifies the vulnerability in the provided code snippet. The use of the `dataset` parameter as a table name without proper validation or escaping is accurately captured, confirming that the reported vulnerability is a true positive. The audit summary indicates that the CodeQL query is effective in detecting this type of SQL injection, and no additional vulnerabilities were identified in this specific context."
+  },
+  {
+    "tool": "CodeQL",
+    "rule_id": "py/sql-injection",
+    "message": "This SQL query depends on a [user-provided value](1).",
+    "locations": [
+      {
+        "uri": "layered_concatenation_injection.py",
+        "line": 64,
+        "full_file": "\"\"\"\nExample 15 \u2013 Layered string concatenation SQL injection (Food delivery analytics)\n\nThis module builds a reporting query across several helper functions.\nIt is vulnerable because user-provided filters are threaded through\nmultiple functions and concatenated into the final query string.\n\"\"\"\n\nimport sqlite3\nfrom flask import Flask, request, jsonify\n\napp = Flask(__name__)\n\n\ndef base_query() -> str:\n    \"\"\"Return the base SELECT clause for the analytics report.\"\"\"\n    return (\n        \"SELECT restaurant_name, COUNT(*) AS num_orders, \"\n        \"SUM(total_price) AS revenue FROM orders \"\n    )\n\n\ndef add_time_filter(sql: str, start: str, end: str) -> str:\n    \"\"\"Append a time window filter to the SQL string.\n\n    Note: This function does not itself introduce a vulnerability, but\n    it builds on the unescaped start/end values passed from above.\n    \"\"\"\n    if start and end:\n        sql += (\n            \"WHERE created_at BETWEEN '\" + start + \"' AND '\" + end + \"' \"\n        )\n    return sql\n\n\ndef add_grouping(sql: str) -> str:\n    \"\"\"Append GROUP BY and ORDER BY clauses.\"\"\"\n    sql += \"GROUP BY restaurant_name ORDER BY revenue DESC\"\n    return sql\n\n\n@app.route(\"/report\")\ndef report():\n    \"\"\"Generate a revenue report for a food delivery platform.\n\n    SQL injection vulnerability:\n    - `start` and `end` date filters are threaded through helper functions.\n    - They are concatenated into the WHERE clause without parameterization,\n      making the final SQL string injectable.\n    \"\"\"\n    start = request.args.get(\"start\", \"\")\n    end = request.args.get(\"end\", \"\")\n\n    sql = base_query()\n    sql = add_time_filter(sql, start, end)\n    sql = add_grouping(sql)\n\n    conn = sqlite3.connect(\"food_delivery.db\")\n    try:\n        cur = conn.cursor()\n\n        # VULNERABLE: final query contains unescaped start/end from user\n        print(f\"[DEBUG] Executing report query: {sql}\")\n        cur.execute(sql)\n        rows = cur.fetchall()\n\n        data = [\n            {\n                \"restaurant\": r[0],\n                \"num_orders\": r[1],\n                \"revenue\": float(r[2]),\n            }\n            for r in rows\n        ]\n        return jsonify(data)\n    finally:\n        conn.close()\n"
+      }
+    ],
+    "cwe": "CWE-89",
+    "cwe_description": "SQL Injection occurs when an application includes untrusted data in a SQL query without proper validation or escaping, allowing attackers to manipulate the query.",
+    "agent_validation": "The validation of the new SQL injection vulnerability has been completed. The existing CodeQL query for SQL injection correctly identifies the vulnerability in the provided code snippet. The concatenation of user-provided `start` and `end` values into the SQL query without proper validation or escaping is accurately captured, confirming that the reported vulnerability is a true positive. The audit summary indicates that the CodeQL query is effective in detecting this type of SQL injection, and no additional vulnerabilities were identified in this specific context."
+  },
+  {
+    "tool": "CodeQL",
+    "rule_id": "py/sql-injection",
+    "message": "This SQL query depends on a [user-provided value](1).",
+    "locations": [
+      {
+        "uri": "limit_offset_injection.py",
+        "line": 39,
+        "full_file": "\"\"\"\nExample 5 \u2013 LIMIT/OFFSET SQL injection (Social media feed)\n\nThis Flask endpoint returns paginated posts for a social media feed.\nIt is vulnerable because page and page_size are concatenated into LIMIT/OFFSET,\nenabling injection through numeric parameters.\n\"\"\"\n\nimport sqlite3\nfrom flask import Flask, request, jsonify\n\napp = Flask(__name__)\n\n\n@app.route(\"/feed\")\ndef get_feed():\n    \"\"\"Return a page of posts for the current user.\n\n    SQL injection vulnerability:\n    - `page` and `page_size` are concatenated directly into LIMIT/OFFSET.\n    - Attackers can inject extra clauses or large values to disrupt queries.\n    \"\"\"\n    page = request.args.get(\"page\", \"1\")\n    page_size = request.args.get(\"page_size\", \"20\")\n\n    conn = sqlite3.connect(\"social.db\")\n    try:\n        cur = conn.cursor()\n\n        # VULNERABLE: numeric parameters concatenated into SQL\n        offset = (int(page) - 1) * int(page_size)\n        query = (\n            \"SELECT id, author, content FROM posts \"\n            \"WHERE is_deleted = 0 \"\n            \"ORDER BY created_at DESC \"\n            \"LIMIT \" + page_size + \" OFFSET \" + str(offset)\n        )\n\n        cur.execute(query)\n        rows = cur.fetchall()\n        posts = [\n            {\"id\": r[0], \"author\": r[1], \"content\": r[2]}\n            for r in rows\n        ]\n        return jsonify(posts)\n    finally:\n        conn.close()\n"
+      }
+    ],
+    "cwe": "CWE-89",
+    "cwe_description": "SQL Injection occurs when an application includes untrusted data in a SQL query without proper validation or escaping.",
+    "agent_validation": "The validation of the new SQL injection vulnerability has been completed. The existing CodeQL query for SQL injection correctly identifies the vulnerability in the provided code snippet. The concatenation of user-provided `page` and `page_size` values into the SQL query without proper validation or escaping is accurately captured, confirming that the reported vulnerability is a true positive. The audit summary indicates that the CodeQL query is effective in detecting this type of SQL injection, and no additional vulnerabilities were identified in this specific context."
+  },
+  {
+    "tool": "CodeQL",
+    "rule_id": "py/sql-injection",
+    "message": "This SQL query depends on a [user-provided value](1).",
+    "locations": [
+      {
+        "uri": "order_by_injection.py",
+        "line": 36,
+        "full_file": "\"\"\"\nExample 4 \u2013 ORDER BY SQL injection (Crowdsourcing taxi app)\n\nThis FastAPI endpoint lists nearby drivers sorted by criteria.\nIt is vulnerable because the `sort` parameter is interpolated into the ORDER BY\nclause, allowing attackers to inject arbitrary SQL fragments.\n\"\"\"\n\nfrom fastapi import FastAPI, Query\nimport mysql.connector\n\napp = FastAPI()\n\n\n@app.get(\"/drivers\")\ndef list_drivers(sort: str = Query(\"rating\")):\n    \"\"\"List available drivers sorted by the requested field.\n\n    SQL injection vulnerability:\n    - `sort` is used directly in an ORDER BY clause via string formatting.\n    - Attackers can inject expressions like `rating DESC; DROP TABLE drivers`.\n    \"\"\"\n    conn = mysql.connector.connect(\n        host=\"localhost\",\n        user=\"root\",\n        password=\"\",\n        database=\"taxi_app\",\n    )\n    try:\n        cur = conn.cursor(dictionary=True)\n\n        base = \"SELECT id, name, rating, completed_trips FROM drivers WHERE online = 1\"\n\n        # VULNERABLE: ORDER BY field fully controlled by client\n        query = f\"{base} ORDER BY {sort}\"\n        cur.execute(query)\n        rows = cur.fetchall()\n        return rows\n    finally:\n        conn.close()\n"
+      }
+    ],
+    "cwe": "CWE-89",
+    "cwe_description": "SQL Injection occurs when an application includes untrusted data in a SQL query without proper validation or escaping, allowing attackers to manipulate the query.",
+    "agent_validation": "The validation of the new SQL injection vulnerability has been completed. The existing CodeQL query for SQL injection correctly identifies the vulnerability in the provided code snippet. The interpolation of the `sort` parameter into the ORDER BY clause without proper validation or escaping is accurately captured, confirming that the reported vulnerability is a true positive. The audit summary indicates that the CodeQL query is effective in detecting this type of SQL injection, and no additional vulnerabilities were identified in this specific context."
+  },
+  {
+    "tool": "CodeQL",
+    "rule_id": "py/sql-injection",
+    "message": "This SQL query depends on a [user-provided value](1).",
+    "locations": [
+      {
+        "uri": "simple_where_clause_injection.py",
+        "line": 40,
+        "full_file": "\"\"\"\nExample 1 \u2013 Simple WHERE-clause SQL injection (University student portal)\n\nThis Flask endpoint checks student login credentials against a MySQL database.\nIt is vulnerable because it directly interpolates the `student_id` into the\nWHERE clause of the SQL query using string concatenation.\n\"\"\"\n\nimport pymysql\nfrom flask import Flask, request, session\n\napp = Flask(__name__)\napp.secret_key = \"dev-secret-key\"\n\n\n@app.route(\"/student/login\", methods=[\"POST\"])\ndef student_login():\n    \"\"\"Authenticate a student by ID and PIN.\n\n    SQL injection vulnerability:\n    - `student_id` from the request is concatenated directly into the SQL string.\n    - An attacker can inject arbitrary SQL into the WHERE clause.\n    \"\"\"\n    db = None\n    try:\n        student_id = request.form.get(\"student_id\", \"\")\n        pin = request.form.get(\"pin\", \"\")\n\n        db = pymysql.connect(\n            host=\"localhost\", user=\"root\", passwd=\"\", db=\"university\"\n        )\n        cursor = db.cursor()\n\n        # VULNERABLE: untrusted student_id concatenated into the query\n        query = (\n            \"SELECT * FROM students \"\n            \"WHERE student_id = '\" + student_id + \"' AND pin = %s\"\n        )\n\n        cursor.execute(query, (pin,))\n        row = cursor.fetchone()\n\n        if row:\n            session[\"student_id\"] = student_id\n            return \"Student login successful\"\n        else:\n            return \"Invalid student ID or PIN\", 401\n\n    except Exception as exc:\n        return f\"Error: {exc}\", 500\n    finally:\n        if db is not None:\n            db.close()\n"
+      }
+    ],
+    "cwe": "CWE-89",
+    "cwe_description": "Improper neutralization of special elements used in an SQL command ('SQL Injection').",
+    "agent_validation": "The validation of the new SQL injection vulnerability has been completed. The existing CodeQL query for SQL injection correctly identifies the vulnerability in the provided code snippet. The interpolation of the `student_id` into the WHERE clause without proper validation or escaping is accurately captured, confirming that the reported vulnerability is a true positive. The audit summary indicates that the CodeQL query is effective in detecting this type of SQL injection, and no additional vulnerabilities were identified in this specific context."
+  },
+  {
+    "tool": "CodeQL",
+    "rule_id": "py/sql-injection",
+    "message": "This SQL query depends on a [user-provided value](1).",
+    "locations": [
+      {
+        "uri": "stored_procedure_injection.py",
+        "line": 36,
+        "full_file": "\"\"\"\nExample 8 \u2013 Stored procedure SQL injection (Banking transaction history)\n\nThis Flask endpoint calls a stored procedure to fetch a customer's\ntransaction history. It is vulnerable because the account number is\ninserted into a dynamic CALL statement.\n\"\"\"\n\nimport mysql.connector\nfrom flask import Flask, request, jsonify\n\napp = Flask(__name__)\n\n\n@app.route(\"/transactions\")\ndef transactions():\n    \"\"\"Return transaction history for a given bank account.\n\n    SQL injection vulnerability:\n    - `account` is interpolated into a CALL statement using string formatting.\n    - Attackers can inject extra arguments or terminate the call and append SQL.\n    \"\"\"\n    account = request.args.get(\"account\", \"\")\n\n    conn = mysql.connector.connect(\n        host=\"localhost\",\n        user=\"bank_user\",\n        password=\"bank_pass\",\n        database=\"banking\",\n    )\n    try:\n        cur = conn.cursor(dictionary=True)\n\n        # VULNERABLE: dynamic stored procedure call\n        call_sql = \"CALL get_transactions_for_account('%s')\" % account\n        cur.execute(call_sql)\n        rows = cur.fetchall()\n\n        return jsonify(rows)\n    finally:\n        conn.close()\n"
+      }
+    ],
+    "cwe": "CWE-89",
+    "cwe_description": "SQL Injection occurs when an application includes untrusted data in a SQL query without proper validation or escaping, allowing attackers to manipulate the query.",
+    "agent_validation": "The validation of the new SQL injection vulnerability has been completed. The existing CodeQL query for SQL injection correctly identifies the vulnerability in the provided code snippet. The interpolation of the `account` parameter into the dynamic CALL statement without proper validation or escaping is accurately captured, confirming that the reported vulnerability is a true positive. The audit summary indicates that the CodeQL query is effective in detecting this type of SQL injection, and no additional vulnerabilities were identified in this specific context."
+  },
+  {
+    "tool": "CodeQL",
+    "rule_id": "py/sql-injection",
+    "message": "This SQL query depends on a [user-provided value](1).",
+    "locations": [
+      {
+        "uri": "subquery_injection.py",
+        "line": 36,
+        "full_file": "\"\"\"\nExample 10 \u2013 Subquery/IN-list SQL injection (HR recruitment portal)\n\nThis Flask endpoint exports applicant records based on a list of IDs.\nIt is vulnerable because the `ids` parameter is inserted into an IN(...) list\ndirectly as text.\n\"\"\"\n\nimport psycopg2\nfrom flask import Flask, request, Response\n\napp = Flask(__name__)\n\n\n@app.route(\"/export_applicants\")\ndef export_applicants():\n    \"\"\"Export applicants whose IDs are provided as a CSV list.\n\n    SQL injection vulnerability:\n    - `ids` string is interpolated directly into an IN (...) clause.\n    - Attackers can inject arbitrary subqueries or modify the WHERE clause.\n    \"\"\"\n    ids = request.args.get(\"ids\", \"\")  # e.g. \"1,2,3\"\n\n    conn = psycopg2.connect(\n        dbname=\"hr_portal\", user=\"hr_user\", password=\"hr_pass\", host=\"localhost\"\n    )\n    try:\n        cur = conn.cursor()\n\n        # VULNERABLE: `ids` pasted directly into IN list\n        query = (\n            \"SELECT id, full_name, email, status \"\n            \"FROM applicants WHERE id IN (\" + ids + \")\"\n        )\n        cur.execute(query)\n        rows = cur.fetchall()\n\n        lines = [\"id,full_name,email,status\"]\n        for r in rows:\n            lines.append(f\"{r[0]},{r[1]},{r[2]},{r[3]}\")\n        csv_data = \"\\n\".join(lines)\n\n        return Response(\n            csv_data,\n            mimetype=\"text/csv\",\n            headers={\"Content-Disposition\": \"attachment; filename=applicants.csv\"},\n        )\n    finally:\n        conn.close()\n"
+      }
+    ],
+    "cwe": "CWE-89",
+    "cwe_description": "Improper neutralization of special elements used in an SQL command ('SQL Injection').",
+    "agent_validation": "The validation of the new SQL injection vulnerability has been completed. The existing CodeQL query for SQL injection correctly identifies the vulnerability in the provided code snippet. The interpolation of the `ids` parameter into the IN(...) clause without proper validation or escaping is accurately captured, confirming that the reported vulnerability is a true positive. The audit summary indicates that the CodeQL query is effective in detecting this type of SQL injection, and no additional vulnerabilities were identified in this specific context."
+  },
+  {
+    "tool": "CodeQL",
+    "rule_id": "py/sql-injection",
+    "message": "This SQL query depends on a [user-provided value](1).",
+    "locations": [
+      {
+        "uri": "union_based_injection.py",
+        "line": 40,
+        "full_file": "\"\"\"\nExample 3 \u2013 UNION-based SQL injection (E-commerce product search)\n\nThis Flask endpoint allows users to search products by keyword.\nIt is vulnerable because the search term is interpolated into the SQL query,\nenabling UNION-based attacks to extract other data from the database.\n\"\"\"\n\nimport psycopg2\nfrom flask import Flask, request, jsonify\n\napp = Flask(__name__)\n\n\n@app.route(\"/search\")\ndef search_products():\n    \"\"\"Search for products by keyword.\n\n    SQL injection vulnerability:\n    - `q` is injected into a LIKE clause using f-strings.\n    - An attacker can close the string and append a UNION SELECT payload.\n    \"\"\"\n    q = request.args.get(\"q\", \"\")\n\n    conn = psycopg2.connect(\n        dbname=\"shop\",\n        user=\"shop_user\",\n        password=\"shop_pass\",\n        host=\"localhost\",\n        port=5432,\n    )\n    try:\n        cur = conn.cursor()\n\n        # VULNERABLE: unescaped `q` directly in f-string\n        query = (\n            f\"SELECT id, name, price FROM products \"\n            f\"WHERE name ILIKE '%{q}%' AND is_active = TRUE\"\n        )\n        cur.execute(query)\n        rows = cur.fetchall()\n\n        results = [\n            {\"id\": r[0], \"name\": r[1], \"price\": float(r[2])}\n            for r in rows\n        ]\n        return jsonify(results)\n    finally:\n        conn.close()\n"
+      }
+    ],
+    "cwe": "CWE-89",
+    "cwe_description": "SQL Injection occurs when an application includes untrusted data in a SQL query without proper validation or escaping.",
+    "agent_validation": "The validation of the new SQL injection vulnerability has been completed. The existing CodeQL query for SQL injection correctly identifies the vulnerability in the provided code snippet. The interpolation of the `q` parameter into the SQL query without proper validation or escaping is accurately captured, confirming that the reported vulnerability is a true positive. The audit summary indicates that the CodeQL query is effective in detecting this type of SQL injection, and no additional vulnerabilities were identified in this specific context."
+  },
+  {
+    "tool": "CodeQL",
+    "rule_id": "py/clear-text-logging-sensitive-data",
+    "message": "This expression logs [sensitive data (private)](1) as clear text.",
+    "locations": [
+      {
+        "uri": "boolean_condition_injection.py",
+        "line": 25,
+        "full_file": "\"\"\"\nExample 2 \u2013 Boolean/conditional SQL injection (Hospital patient lookup)\n\nThis script provides a simple CLI to look up patient records by numeric ID.\nIt is vulnerable because the `patient_id` input is appended directly to the query\nwithout validation or parameterization, allowing boolean-condition injections.\n\"\"\"\n\nimport sqlite3\n\n\ndef get_patient_record(patient_id: str) -> None:\n    \"\"\"Fetch a patient record by patient_id from an SQLite database.\n\n    SQL injection vulnerability:\n    - `patient_id` is directly concatenated into the WHERE condition.\n    - Attackers can inject expressions like `1 OR 1=1` to bypass checks.\n    \"\"\"\n    conn = sqlite3.connect(\"hospital.db\")\n    try:\n        cursor = conn.cursor()\n\n        # VULNERABLE: `patient_id` used directly in numeric condition\n        query = \"SELECT id, full_name, diagnosis FROM patients WHERE id = \" + patient_id\n        print(f\"[DEBUG] Executing: {query}\")\n        cursor.execute(query)\n        row = cursor.fetchone()\n\n        if row:\n            print(\"Patient:\", row)\n        else:\n            print(\"No patient found with that ID.\")\n    finally:\n        conn.close()\n\n\nif __name__ == \"__main__\":\n    user_input = input(\"Enter patient ID: \")\n    get_patient_record(user_input)\n"
+      }
+    ],
+    "cwe": "CWE-532",
+    "cwe_description": "Insecure logging of sensitive information such as passwords, credit card numbers, or personal data.",
+    "agent_validation": "The validation of the new vulnerability regarding insecure logging of sensitive data has been completed. The provided code snippet demonstrates that sensitive data, specifically the `patient_id`, is logged in clear text when executing the SQL query. This confirms that the reported vulnerability is a true positive. The audit summary indicates that there are no existing CodeQL queries to validate against this specific vulnerability, highlighting a potential gap in the detection of insecure logging practices. Recommendations for enhancing security include implementing proper logging practices that mask or omit sensitive information."
+  }
+]

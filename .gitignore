@@ -1,0 +1,22 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+
+# Environment
+.env/
+venv/
+.venv/
+
+# CodeQL generated folders
+codeql-cl/
+codeql_db/
+
+# File with openAI key
+.env
+*.env
