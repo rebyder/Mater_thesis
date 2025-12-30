@@ -30,6 +30,7 @@ from config import OUTPUT_QUERIES_PATH
 QUERY_PACK_TOT = "/Users/rebeccaderosa/.codeql/packages/codeql/python-queries/1.6.8/Security"
 import json
 import os
+from pathlib import Path
 
 client = OpenAI()
 
@@ -136,11 +137,14 @@ class AnalyzerAgent(BaseAgent):
             report (list[dict]): list of vulnerability extracted from the SARIF report.
         """
 
+        files = set()
         for vuln in report:
+                
                 locations = vuln.get("locations")
                 for loc in locations:
                     line = loc.get("line")
                     file = "./vulnerable_code/" + loc.get("uri")
+                    files.add(loc.get("uri"))
                     with open(file, "r", encoding="utf-8") as f:
                         full_file = f.read()
                 
@@ -152,7 +156,33 @@ class AnalyzerAgent(BaseAgent):
                     vuln["cwe"] = cwe["cwe"]
                     vuln["cwe_description"] = cwe["description"]
 
+        folder = Path("./vulnerable_code/")
 
+        for file_path in folder.iterdir():
+            if file_path.is_file():
+                if file_path.name not in files:
+                    try :
+                        with open(file_path, "r", encoding="utf-8") as f:
+                            content = f.read()
+                        new_entry = {         
+                            "tool": "None",
+                            "rule_id": "None",
+                            "message": "No vulnerability detected by CodeQL",
+                            "locations": [
+                            {
+                                "uri": file_path.name,
+                                "line": 0,
+                                "full_file": content
+                            }
+                            ],
+                            "cwe": "None",
+                            "cwe_description": "None",
+                        }
+                        files.add(file_path.name)
+                        report.append(new_entry)
+                    except Exception as e:
+                        print(f"Error in reading the file {file_path.name}")
+                    
     def step(self, observation: str) -> ReActChain:
         """
         Execute eache single step of the ReAct cycle.
@@ -279,16 +309,34 @@ class AnalyzerAgent(BaseAgent):
             last_observation = self.last_step.observation
 
             for vuln in structured_report:
-                cwe = vuln.get("cwe", "")
-                existing_queries = self.load_existing_queries(cwe)
+                cwe = vuln.get("cwe", "None")
+                rule_id = vuln.get("rule_id", "None")
+                filename = vuln['locations'][0]['uri'] if vuln.get('locations') else "unknown_file"
+                
+                if rule_id == "None" or rule_id == "clean-file":
+                    instruction = (
+                        f"MANUAL AUDIT REQUIRED: CodeQL did not find any vulnerability in '{filename}'. "
+                        "Your goal is to perform an independent zero-base scan of the 'full_file' "
+                        "to identify hidden vulnerabilities, logic gaps, or misconfigurations."
+                    )
+                else:
+                    instruction = (
+                        f"VALIDATION REQUIRED: CodeQL flagged a potential vulnerability ({rule_id}). "
+                        "Analyze the 'full_file' to confirm if this is a True Positive or a False Positive."
+                    )
 
                 analysis_context = {
-                    "vulnerability": vuln,
-                    "existing_queries_to_validate": existing_queries 
+                    "instruction": instruction,
+                    "target_file": filename,
+                    "sarif_finding": {
+                        "rule_id": rule_id,
+                        "message": vuln.get("message", ""),
+                        "cwe": cwe
+                    },
+                    "full_file": vuln['locations'][0].get("full_file", "Source code not available")
                 }
 
-                last_observation = f"New vulnerability to validate: {json.dumps(analysis_context)}"
-
+                last_observation = f"New audit task: {json.dumps(analysis_context, indent=2)}"
 
                 for step in range(self.max_steps):
                     current_reasoning = self.step(last_observation)  
@@ -310,7 +358,9 @@ class AnalyzerAgent(BaseAgent):
 
                     last_observation = "Observation: Alert analyzed against query logic. Waiting for final verdict."
 
+
             self.last_step.action = json.dumps(structured_report, indent=2)
+            
 
         except Exception as e:
             error_msg = f"\nError in AnalyzerAgent: {e}"

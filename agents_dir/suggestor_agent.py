@@ -21,6 +21,7 @@ import json
 import os
 from tools import ExistingQuery
 from typing import List, Set
+import re
 
 from pydantic import Field
 from agents_dir.base_agent import BaseAgent, ReActChain, SharedMemory, BaseTaskInput
@@ -137,10 +138,48 @@ class SuggestorAgent(BaseAgent):
         super().reset(task_input)
         
         if isinstance(task_input, SuggestorInput):
-            self.report_items = json.loads(task_input.report_content)
-            self.last_step.observation=task_input.report_content
+            items = json.loads(task_input.report_content)
+
+            for item in items:
+                if not item.get("cwe") or str(item.get("cwe")) == "None":
+                    text = item.get("agent_validation", "").lower()
+                    if "sql injection" in text:
+                        item["cwe"] = "CWE-89"
+                        item["cwe_description"] = "SQL Injection"
+                        print("Andata\n")
+                    elif "xss" in text:
+                        item["cwe"] = "CWE-79"
+                        item["cwe_description"] = "Croos-Site Scripting"
+                    elif "command injection" in text:
+                        item["cwe"] = "CWE-78"
+                        item["cwe_description"] = "OS Command Injection"
+               
+            with open("analyzer_report.json", "w", encoding="utf-8") as f:
+                f.write(json.dumps(items, indent=2))
+            print("Complete Analyzer report saved in 'analyzer_reoport.json\n")
+
+            self.report_items = items    
+            self.last_step.observation=json.dumps(items)
             self.processed_cwes.clear()
             self.all_actions = []
+            
+
+    def summarize(self, query: str, text: str) -> str:
+        if len(text)< 1000:
+            return text
+
+        summary_prompt = f"""
+        Analyze the following web search result for the query: "{query}".
+        Extracr only the relevantiinfomrations like:
+        - the CodeQL classes, predicates or library names mentioned.
+        - specific AST elements (Sources, Sinks).
+        - code snippets or logic patterns for TainTracking.
+        Discard all navigation menus, ads and irrelevant prose.
+        Result to summarize: {text[:8000]}
+        """
+
+        response = self.llm.invoke(summary_prompt)
+        return f"Compressed web search result: {response.content}"
    
     def load_existing_queries(self, cwe: str):
         """
@@ -210,7 +249,7 @@ class SuggestorAgent(BaseAgent):
 
         self.update_memory(observation)
 
-        scratchpad = self.shared_memory.to_messages()
+        scratchpad = self.shared_memory.to_messages()[-10:]
         instructions = self.prompt_template 
 
         summary_out = self.summ_procedure.run(instructions, scratchpad)
@@ -268,8 +307,19 @@ class SuggestorAgent(BaseAgent):
         """
 
         print("[Suggestor]: ")
+
+        all_target_cwes = {
+            item.get("cwe") for item in self.report_items
+            if item.get("cwe") and item.get("cwe") != "None"
+        }
+        
+        if not all_target_cwes:
+            return SuggestorOutput(final_report = "No vulnerabilities indentified by the Analzyer")
+            
         last_observation = self.last_step.observation
         available_tools = {tool.__name__: tool for tool in self.tools} # WebSearchTool, SuggestSubAgent, FinishToolSuggestor
+
+               
 
         for step in range(self.max_steps):
 
@@ -284,12 +334,13 @@ class SuggestorAgent(BaseAgent):
             
             action_name = current_action.__class__.__name__
 
-            pending_cwe = set(item.get("cwe") for item in self.report_items if item.get("cwe")) - self.processed_cwes # unique cwes left to analyze
+            pending_cwe = all_target_cwes - self.processed_cwes
             if pending_cwe and action_name not in ("SuggestSubAgent", "WebSearchTool"):
                 last_observation = f"Pending CWE {pending_cwe}. You must generate a detection plan using SuggestSubAgent or find more information about recent CodeQL documentation with  WebSearchTool."
                 self.update_memory(last_observation)
                 print(f"\n[{step}] Thought: {current_reasoning.thought}\n")
                 continue
+           
 
             print(f"\n[{step}] Thought: {current_reasoning.thought}\n")
             print(f"Action: {action_name}\n")
@@ -306,11 +357,21 @@ class SuggestorAgent(BaseAgent):
                     if action_name=="SuggestSubAgent":
                         self.all_actions.append(result)
                         cwe = getattr(current_action, 'cwe', 'unknown')
-                        last_observation = f"\nSUCCESS: Detection plan for {cwe} successfully generated and stored.\n"
-                    else:
-                        last_observation = f"\nResult: {result}"
-
-                    print("Result: ", result)
+                        #pending_cwe = all_target_cwes - self.processed_cwes
+                        if pending_cwe:
+                            last_observation = f"\nSUCCESS: Detection plan for {cwe} successfully generated and stored. Remaining tool to process: {pending_cwe}\n"
+                            self.update_memory(last_observation)
+                        else:
+                            last_observation = f"SUCCESS: All CWEs processed. You can know call FinishToolSuggestor to summarize."
+                            self.update_memory(last_observation)
+                            continue
+                    
+                    if action_name == "WebSearchTool":
+                        query = getattr(current_action, 'query', 'CodeQL research')
+                        summary_text = self.summarize(query, str(result))
+                        last_observation = f"\nResult summarized: {summary_text}"
+                        self.update_memory(last_observation)
+                   
 
 
                 except Exception as e:

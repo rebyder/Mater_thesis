@@ -316,6 +316,7 @@ class WriteQuerySubAgent(BaseModel):
             select sink.getNode(), source, sink, "Message $@.", source.getNode(), "Source Label"
         
         Important rules:
+        - NEVER starts the '.ql' file with "```ql".
         - you MUST innovate the queries, not copy the existing ones.
         - you MUST use ONLY CodeQL syntax.
         - the query must be compile-ready
@@ -330,7 +331,9 @@ class WriteQuerySubAgent(BaseModel):
         3. Metadata first: start the file with the mandatory metadata (@kind, @id, @name).
         4. Do not include the header '```ql' in the first line of the query.
 
-        Important: Innovate by targeting the specific patterns identified in the report, but ground your innovation in real CodeQL library capabilities.
+        Important notea:
+        - Innovate by targeting the specific patterns identified in the report, but ground your innovation in real CodeQL library capabilities.
+        - NEVER starts the '.ql' file with "```ql".
         """
         
         try:
@@ -440,15 +443,14 @@ class SuggestSubAgent(BaseModel):
         
         Your "Technical AST Detection Plan" must:
         1. Deconstruct the Taint-Flow: map the path from untrusted entry points to dangerous execution sinks.
-        2. Modern API intelligence: don't limit yourself to the code provided. Don't just look at the provided code. Suggest sinks for modern Python database libraries (SQLAlchemy, Django ORM, asyncpg) that fit this CWE.
-           Suggest potential sanitizers (e.g., "calls to `int()` or `float()`", "use of prepared statements"). If you are unsure about that you must call the `WebSearchTool`.
-        3. Precision mapping: clearly distinguish between AST elements (Attribute vs Call) to avoid the compilation errors seen in previous iterations
+        2. Modern API intelligence: don't limit yourself to the code provided. Don't just look at the provided code. Suggest sinks for modern Python database libraries that fit this CWE.
+           Suggest potential sanitizers. If you are unsure about that you must call the `WebSearchTool`.
+        3. Precision mapping: clearly distinguish between AST elements to avoid the compilation errors seen in previous iterations
         4. Use structural AST details:
-            - specify if a node is a `Call` (e.g., `execute()`), a `Name` (e.g., `query`) or an `Attribute` (e.g., `request.form`)
-        5. Modeling Pattern: Explicitly recommend a Modular Configuration structure (Source, Sink, and Sanitizer predicates together). Suggest to implements a  'ConfigSig' to allow the global tracking of data across multiple function boundaries.
+        5. Modeling Pattern: Explicitly recommend a Modular Configuration structure (Source, Sink, and Sanitizer predicates together). 
 
         Important rule:
-        Do NOT use CodeQL syntax. Use Python syntax (e.g., "method arguments", "dictionary keys") that can be mapped to AST nodes.
+        Do NOT use CodeQL syntax. Use Python syntax that can be mapped to AST nodes.
         """
         #Taint-FLow = flusso di contaminazione
 
