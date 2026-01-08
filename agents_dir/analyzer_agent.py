@@ -313,7 +313,7 @@ class AnalyzerAgent(BaseAgent):
                 rule_id = vuln.get("rule_id", "None")
                 filename = vuln['locations'][0]['uri'] if vuln.get('locations') else "unknown_file"
                 
-                if rule_id == "None" or rule_id == "clean-file":
+                if rule_id == "None":
                     instruction = (
                         f"MANUAL AUDIT REQUIRED: CodeQL did not find any vulnerability in '{filename}'. "
                         "Your goal is to perform an independent zero-base scan of the 'full_file' "

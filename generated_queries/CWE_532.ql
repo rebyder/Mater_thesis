@@ -1,47 +1,39 @@
 ```ql
 /**
  * @kind path-problem
- * @id python/insecure-logging-sensitive-info
- * @name Insecure Logging of Sensitive Information
- * 
- * This query detects insecure logging practices in Python code where sensitive information 
- * from untrusted sources is logged without proper sanitization.
+ * @id cwe_532_insecure_logging
+ * @name Insecure Logging of Sensitive Information (CWE-532)
+ * @description This query detects insecure logging of sensitive information in Python applications, 
+ * specifically focusing on the taint flow from untrusted user input to dangerous execution sinks.
  */
 
 import python
-import semmle.code.python.dataflow.new.DataFlow
-import semmle.code.python.dataflow.new.TaintTracking
-import MyFlow::PathGraph
+import DataFlow::PathGraph
 
-module MyConfig implements DataFlow::ConfigSig {
-    // Predicate to identify untrusted sources, such as user inputs
-    predicate isSource(DataFlow::Node source) { 
-        source.asExpr() instanceof Call
-        and source.getCallee().getName() = "input"
-    }
-
-    // Predicate to identify dangerous execution points, such as logging
-    predicate isSink(DataFlow::Node sink) { 
-        sink.asExpr() instanceof Call
-        and sink.getCallee().getName() = "print"
-    }
-
-    // Predicate to identify sanitization methods
-    predicate isSanitized(DataFlow::Node input) {
-        input.asExpr() instanceof Call
-        and input.getCallee().getName() in ["str", "repr"]
-    }
-
-    // Define the flow configuration
-    override predicate isSanitized(DataFlow::Node input) {
-        isSanitized(input)
-    }
+// Define a predicate to identify sources of untrusted data
+predicate isSource(FunctionCall call) {
+    call.getName() = "input"
 }
 
-module MyFlow = TaintTracking::Global<MyConfig>;
+// Define a predicate to identify dangerous execution sinks
+predicate isSink(FunctionCall call) {
+    call.getName() = "execute" or
+    call.getName() = "session.execute" or
+    call.getName() = "Model.objects.raw" or
+    call.getName() = "Model.objects.filter"
+}
 
-from MyFlow::PathNode source, MyFlow::PathNode sink
-where MyFlow::flowPath(source, sink)
-    and not MyFlow::isSanitized(source) // Ensure the source is not sanitized
-select sink.getNode(), source, sink, "This sensitive data is logged as clear text.", source.getNode(), "Untrusted Input Source"
+// Define a predicate to identify tainted variables
+predicate isTaintedVariable(Variable var) {
+    var.getName() = "patient_id"
+}
+
+// Define a predicate to track the flow of tainted data
+from FunctionCall source, Variable taintedVar, FunctionCall sink
+where
+    isSource(source) and
+    isTaintedVariable(taintedVar) and
+    sink = source.getACall().getAnArgument() and
+    DataFlow::PathGraph.hasFlow(source, taintedVar, sink)
+select sink, "Tainted data flows from user input to a dangerous execution sink."
 ```

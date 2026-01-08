@@ -146,7 +146,6 @@ class SuggestorAgent(BaseAgent):
                     if "sql injection" in text:
                         item["cwe"] = "CWE-89"
                         item["cwe_description"] = "SQL Injection"
-                        print("Andata\n")
                     elif "xss" in text:
                         item["cwe"] = "CWE-79"
                         item["cwe_description"] = "Croos-Site Scripting"
@@ -337,7 +336,8 @@ class SuggestorAgent(BaseAgent):
             pending_cwe = all_target_cwes - self.processed_cwes
             if pending_cwe and action_name not in ("SuggestSubAgent", "WebSearchTool"):
                 last_observation = f"Pending CWE {pending_cwe}. You must generate a detection plan using SuggestSubAgent or find more information about recent CodeQL documentation with  WebSearchTool."
-                self.update_memory(last_observation)
+                self.last_step.observation = last_observation
+                self.update_memory(self.last_step.observation)
                 print(f"\n[{step}] Thought: {current_reasoning.thought}\n")
                 continue
            
@@ -349,28 +349,37 @@ class SuggestorAgent(BaseAgent):
                 # aggregate all the output (reports) of each step
                 full_report = "\n\n".join(self.all_actions)
                 self.shared_memory.set_data("target_cwes", list(self.processed_cwes)) # save the list of cwes processed in the memory
+                last_observation = f"Generation of the report {full_report} completed. Now I will pass the information to the Creator."
+                self.last_step.observation = last_observation
+                self.last_step.action = current_action
+                self.update_memory(self.last_step.observation)
                 return SuggestorOutput(final_report=full_report)  
             
             if action_name in available_tools:
                 try:
                     result = available_tools[action_name](**current_action.dict()).run(self.llm)
+                    self.last_step.action = current_action
                     if action_name=="SuggestSubAgent":
                         self.all_actions.append(result)
                         cwe = getattr(current_action, 'cwe', 'unknown')
                         #pending_cwe = all_target_cwes - self.processed_cwes
                         if pending_cwe:
                             last_observation = f"\nSUCCESS: Detection plan for {cwe} successfully generated and stored. Remaining tool to process: {pending_cwe}\n"
-                            self.update_memory(last_observation)
+                            self.last_step.observation = last_observation
+                            self.update_memory(self.last_step.observation)
                         else:
                             last_observation = f"SUCCESS: All CWEs processed. You can know call FinishToolSuggestor to summarize."
-                            self.update_memory(last_observation)
+                            self.last_step.observation = last_observation
+                            self.update_memory(self.last_step.observation)
                             continue
                     
                     if action_name == "WebSearchTool":
                         query = getattr(current_action, 'query', 'CodeQL research')
                         summary_text = self.summarize(query, str(result))
                         last_observation = f"\nResult summarized: {summary_text}"
-                        self.update_memory(last_observation)
+                        self.last_step.observation = last_observation
+                        self.last_step.action = summary_text
+                        self.update_memory(self.last_step.observation)
                    
 
 
@@ -383,7 +392,8 @@ class SuggestorAgent(BaseAgent):
                 self.update_memory(last_observation)
                 continue
 
-            self.update_memory(last_observation)
+            self.update_memory(self.last_step.observation)
+        
         
         raise TimeoutError(f"Suggestor exceeded max steps ({self.max_steps})") 
 

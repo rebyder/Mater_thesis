@@ -1,311 +1,287 @@
-### Technical AST Detection Plan for CWE-532: Insecure Logging of Sensitive Information
+### Technical AST Detection Plan for CWE-89: SQL Injection
 
 #### 1. Deconstruct the Taint-Flow
 
 To effectively map the taint flow from untrusted entry points to dangerous execution sinks, we need to identify the following components:
 
-- **Untrusted Entry Points**: These are the sources of user input that can be manipulated by an attacker. In the provided code, the untrusted entry point is:
-  - `user_input` from `input("Enter patient ID: ")`
+- **Sources**: Points in the code where user input is received.
+- **Sinks**: Points in the code where SQL queries are executed.
+- **Sanitizers**: Functions or methods that validate or sanitize user input before it reaches the sink.
 
-- **Tainted Data Propagation**: The tainted data flows from the untrusted entry point to the SQL query construction. The path is as follows:
-  - `user_input` → `get_patient_record(patient_id)` → `query` (constructed using `patient_id`)
+**Mapping Taint Flow:**
 
-- **Dangerous Execution Sinks**: These are the points in the code where the tainted data is executed or logged in a way that could expose sensitive information. In the provided code, the dangerous execution sink is:
-  - `cursor.execute(query)` (where the SQL query is executed)
-  - `print(f"[DEBUG] Executing: {query}")` (where the SQL query is logged)
-
-#### 2. Modern API Intelligence
-
-In addition to the provided code, we should consider other modern Python database libraries and their potential vulnerabilities:
-
-- **SQLAlchemy**: 
-  - Sink: `session.execute(query)` or `session.query(Model).filter(...)`
-  - Sanitizer: Use of `session.query(Model).filter_by(...)` or `session.execute(text(query))` with parameter binding.
-
-- **Django ORM**: 
-  - Sink: `Model.objects.raw(query)` or `Model.objects.filter(...)`
-  - Sanitizer: Use of `Model.objects.get(id=patient_id)` or `Model.objects.filter(id=patient_id)`
-
-- **asyncpg**: 
-  - Sink: `connection.fetch(query)` or `connection.execute(query)`
-  - Sanitizer: Use of parameterized queries like `connection.fetch("SELECT * FROM patients WHERE id=$1", patient_id)`
-
-#### 3. Precision Mapping
-
-To avoid compilation errors, we need to clearly distinguish between AST elements:
-
-- **Untrusted Input**: 
-  - `Name` node: `user_input`
-  
-- **Function Call**: 
-  - `Call` node: `get_patient_record(patient_id)`
-  
-- **Query Construction**: 
-  - `Name` node: `patient_id`
-  - `Attribute` node: `query`
-  
-- **Execution Sink**: 
-  - `Call` node: `cursor.execute(query)`
-  
-- **Logging Sink**: 
-  - `Call` node: `print(f"[DEBUG] Executing: {query}")`
-
-#### 4. Structural AST Details
-
-The following structural details should be captured in the CodeQL query:
-
-- **Source**: 
-  - Identify `input()` calls that capture user input.
-  
-- **Sink**: 
-  - Identify `execute()` calls on database cursors or ORM methods that execute queries.
-  - Identify `print()` calls that log sensitive information.
-
-- **Sanitizer**: 
-  - Identify calls to sanitizing functions or methods that ensure safe handling of user input (e.g., parameterized queries).
-
-#### 5. Modeling Pattern
-
-To implement a modular configuration structure, we recommend the following:
-
-- **Source Predicate**: 
-  - Define a predicate that captures user input sources, e.g., `isUserInput(input_node)`.
-
-- **Sink Predicate**: 
-  - Define a predicate that captures dangerous execution sinks, e.g., `isDangerousExecution(call_node)`.
-
-- **Sanitizer Predicate**: 
-  - Define a predicate that captures sanitizing functions, e.g., `isSanitizer(call_node)`.
-
-- **ConfigSig**: 
-  - Implement a `ConfigSig` that tracks the flow of tainted data across function boundaries, allowing for global tracking of sensitive data.
-
-### Example Configuration
-
-```python
-def isUserInput(node):
-    return node is input()
-
-def isDangerousExecution(node):
-    return node is cursor.execute() or node is print()
-
-def isSanitizer(node):
-    return node is session.query() or node is Model.objects.get()
-
-def ConfigSig(data):
-    # Logic to track data flow across functions
-    pass
-```
-
-This structured approach will help in writing a predictive CodeQL query that effectively identifies instances of CWE-532 in various contexts, ensuring that sensitive information is not logged insecurely.
-
-### Technical AST Detection Plan for CWE-203: Information Exposure Through Sent Data
-
-#### 1. Deconstructing the Taint-Flow
-
-To effectively map the taint flow from untrusted entry points to dangerous execution sinks, we will identify the following components:
-
-- **Untrusted Entry Points**: 
-  - `request.form.get("student_id", "")` - This is where user input is received and is considered untrusted.
-
-- **Taint Propagation**:
-  - The `student_id` variable is directly concatenated into the SQL query string, which is a critical point of taint propagation.
-
-- **Dangerous Execution Sinks**:
-  - The `cursor.execute()` method is the sink where the tainted data is executed against the database.
-
-#### 2. Modern API Intelligence
-
-In addition to the provided code, we will consider other modern Python database libraries and their potential vulnerabilities:
+- **Sources**:
+  - `request.args.get(...)` for query parameters.
+  - `request.form.get(...)` for form data.
+  - `input(...)` for command-line inputs.
 
 - **Sinks**:
-  - For **SQLAlchemy**: 
-    - `session.execute()`
-    - `session.query().filter()`
-  - For **Django ORM**:
-    - `Model.objects.raw()`
-    - `Model.objects.filter()`
-  - For **asyncpg**:
-    - `connection.execute()`
-    - `connection.fetch()`
+  - `cur.execute(...)` for executing SQL queries.
+  - `cur.callproc(...)` for calling stored procedures.
+  - Any method that directly executes SQL commands, such as `cur.copy_expert(...)`.
 
-- **Potential Sanitizers**:
-  - Use of **prepared statements**: 
-    - For example, `cursor.execute("SELECT * FROM students WHERE student_id = %s", (student_id,))` in the context of `pymysql`.
-    - In **SQLAlchemy**, use `session.query(Student).filter(Student.student_id == student_id).all()`.
-  - Type conversion functions: 
-    - Calls to `int()` or `float()` to sanitize numeric inputs before using them in queries.
+- **Sanitizers**:
+  - Parameterized queries (e.g., using `?` or `%s` placeholders).
+  - Input validation functions that check for allowed characters or patterns.
 
-#### 3. Precision Mapping
-
-To avoid compilation errors, we will clearly distinguish between AST elements:
-
-- **AST Elements**:
-  - `Call`: Represents function calls, e.g., `cursor.execute()`, `db.cursor()`.
-  - `Name`: Represents variable names, e.g., `student_id`, `pin`.
-  - `Attribute`: Represents object attributes, e.g., `request.form`, `session`.
-
-#### 4. Structural AST Details
-
-We will specify the structural details of the AST nodes involved in the taint flow:
-
-- **Untrusted Input**:
-  - `Attribute` node: `request.form`
-  - `Call` node: `get()`
-  - `Name` node: `student_id`
-
-- **Tainted Data Usage**:
-  - `Name` node: `student_id`
-  - `Call` node: `cursor.execute()`
-  - `String` node: SQL query string
-
-#### 5. Modeling Pattern
-
-To implement a modular configuration structure, we will define predicates for Sources, Sinks, and Sanitizers:
-
-- **Source Predicate**:
-  - Identify untrusted data sources:
-    ```python
-    def is_source(node):
-        return isinstance(node, Call) and node.func == 'get' and isinstance(node.parent, Attribute) and node.parent.attr == 'form'
-    ```
-
-- **Sink Predicate**:
-  - Identify dangerous execution sinks:
-    ```python
-    def is_sink(node):
-        return isinstance(node, Call) and (node.func == 'execute' or node.func == 'fetch' or node.func == 'filter')
-    ```
-
-- **Sanitizer Predicate**:
-  - Identify sanitization methods:
-    ```python
-    def is_sanitizer(node):
-        return isinstance(node, Call) and (node.func == 'execute' and len(node.args) == 2 and isinstance(node.args[1], Tuple))
-    ```
-
-- **ConfigSig Implementation**:
-  - Implement a global tracking mechanism to allow data tracking across multiple function boundaries:
-    ```python
-    def config_sig(data):
-        # Track data flow across function calls
-        pass
-    ```
-
-By following this structured approach, we can enhance the detection of information exposure vulnerabilities in Python applications, ensuring that we account for modern database libraries and their specific patterns of usage.
-
-### Technical AST Detection Plan for CWE-89: SQL Injection
-
-#### 1. Deconstruct the Taint-Flow
-
-To effectively detect SQL injection vulnerabilities, we need to map the flow of untrusted data from entry points to execution sinks. The following steps outline this process:
-
-- **Untrusted Entry Points**: Identify sources of untrusted data, such as:
-  - `request.args` (query parameters)
-  - `request.form` (form data)
-  - `input()` (user input in CLI applications)
-
-- **Taint Propagation**: Track how this untrusted data propagates through the application. This includes:
-  - Assignments to variables (e.g., `ids = request.args.get("ids", "")`)
-  - Passing through functions (e.g., `add_time_filter(sql, start, end)`)
-
-- **Dangerous Execution Sinks**: Identify where the tainted data is used in SQL execution, such as:
-  - Calls to `execute()`
-  - Dynamic SQL string concatenation (e.g., `query = "SELECT * FROM table WHERE column = '" + user_input + "'"`)
+**Example Taint Flow**:
+```plaintext
+Source (request.args.get("ids")) -> Tainted Variable (ids) -> Sink (cur.execute(query))
+```
 
 #### 2. Modern API Intelligence
 
 In addition to the provided code, consider the following modern Python database libraries and their potential sinks:
 
 - **SQLAlchemy**:
-  - Sinks: `session.execute()`, `session.query()`
-  - Sanitizers: Use of `text()` for raw SQL queries, or ORM methods that automatically parameterize queries.
+  - Sinks: `session.execute(...)`, `session.query(...).all()`, `session.query(...).filter(...)`.
+  - Sanitizers: Use of ORM features to prevent SQL injection by using query builders.
 
 - **Django ORM**:
-  - Sinks: `Model.objects.raw()`, `cursor.execute()`
-  - Sanitizers: Use of Django's ORM methods (e.g., `filter()`, `get()`) that handle parameterization.
+  - Sinks: `Model.objects.raw(...)`, `Model.objects.filter(...)`.
+  - Sanitizers: Use of Django's built-in query methods that automatically escape inputs.
 
-- **asyncpg**:
-  - Sinks: `connection.execute()`, `connection.fetch()`
-  - Sanitizers: Use of parameterized queries with `$1`, `$2`, etc.
+- **Peewee**:
+  - Sinks: `Model.select(...)`, `Model.raw(...)`.
+  - Sanitizers: Use of query builders that handle escaping.
+
+**Potential Sanitizers**:
+- Use of parameterized queries.
+- Input validation functions that restrict input to expected formats (e.g., regex checks).
 
 #### 3. Precision Mapping
 
-To avoid compilation errors, we need to clearly distinguish between AST elements. Here are the key elements to track:
+To avoid compilation errors, we need to clearly distinguish between AST elements. Here are the key AST elements to focus on:
 
-- **Source**: 
-  - `request.args` (Call to `get()`)
-  - `request.form` (Call to `get()`)
-  - `input()` (Call to `input()`)
+- **Function Calls**: Identify function calls that represent sources, sinks, and sanitizers.
+- **Variable Assignments**: Track variable assignments to identify where tainted data is stored.
+- **String Concatenation**: Identify instances where strings are concatenated to form SQL queries.
 
-- **Sink**:
-  - `execute()` (Call to `execute()`)
-  - `cursor.execute()` (Call to `execute()` on cursor)
-  - `session.execute()` (Call to `execute()` on SQLAlchemy session)
+**Example AST Elements**:
+```python
+# Source
+source_call = ast.Call(func=ast.Attribute(value=ast.Name(id='request', ctx=ast.Load()), attr='args', ctx=ast.Load()), args=[ast.Constant(value='ids')], keywords=[])
 
-- **Sanitizer**:
-  - Calls to `int()` or `float()` for numeric inputs
-  - Use of prepared statements or ORM methods that handle parameterization
+# Sink
+sink_call = ast.Call(func=ast.Attribute(value=ast.Name(id='cur', ctx=ast.Load()), attr='execute', ctx=ast.Load()), args=[ast.Name(id='query', ctx=ast.Load())], keywords=[])
+
+# Sanitizer
+sanitizer_call = ast.Call(func=ast.Attribute(value=ast.Name(id='db', ctx=ast.Load()), attr='execute', ctx=ast.Load()), args=[ast.Constant(value='SELECT * FROM users WHERE id = %s')], keywords=[])
+```
 
 #### 4. Use Structural AST Details
 
-When modeling the AST, we need to specify the types of nodes involved:
+Utilize the structural details of the AST to identify patterns of taint flow. For example, look for:
 
-- **Source Nodes**:
-  - `Call` (e.g., `request.args.get("ids", "")`)
-  - `Call` (e.g., `input()`)
+- **Function Definitions**: Identify functions that handle user input.
+- **Return Statements**: Identify where data is returned to the caller.
+- **Conditional Statements**: Identify branches that may lead to execution of tainted data.
 
-- **Sink Nodes**:
-  - `Call` (e.g., `cur.execute(query)`)
-  - `Call` (e.g., `session.execute(query)`)
+**Example Structural Patterns**:
+```python
+# Function definition for a source
+def student_login():
+    student_id = request.form.get("student_id", "")
+    # Tainted variable
 
-- **Sanitizer Nodes**:
-  - `Call` (e.g., `int(page)`)
-  - `Call` (e.g., `float(price)`)
+# Function definition for a sink
+def execute_query(query):
+    cur.execute(query)  # Potential sink
+```
 
-#### 5. Modeling Pattern
+#### 5. Modeling Pattern: Modular Configuration
 
-To implement a modular configuration structure, we can define predicates for sources, sinks, and sanitizers. This will allow for global tracking of data across multiple function boundaries.
+To create a modular configuration structure, define predicates for sources, sinks, and sanitizers:
 
-- **Source Predicate**:
+```python
+# Source Predicate
+def is_source(node):
+    return isinstance(node, ast.Call) and (
+        (isinstance(node.func, ast.Attribute) and node.func.attr in ['get', 'getlist']) or
+        (isinstance(node.func, ast.Name) and node.func.id == 'input')
+    )
+
+# Sink Predicate
+def is_sink(node):
+    return isinstance(node, ast.Call) and (
+        (isinstance(node.func, ast.Attribute) and node.func.attr in ['execute', 'callproc']) or
+        (isinstance(node.func, ast.Name) and node.func.id in ['copy_expert'])
+    )
+
+# Sanitizer Predicate
+def is_sanitizer(node):
+    return isinstance(node, ast.Call) and (
+        (isinstance(node.func, ast.Attribute) and node.func.attr in ['execute'] and '%s' in node.args[0].s) or
+        (isinstance(node.func, ast.Name) and node.func.id in ['validate_input'])
+    )
+```
+
+### Conclusion
+
+This Technical AST Detection Plan provides a comprehensive approach to enhancing the detection of SQL injection vulnerabilities in Python applications. By deconstructing the taint flow, leveraging modern API intelligence, and utilizing precise AST mapping, we can create a robust CodeQL query that effectively identifies and mitigates SQL injection risks.
+
+### Technical AST Detection Plan for CWE-532: Insecure Logging of Sensitive Information
+
+#### 1. Deconstruct the Taint-Flow
+
+To effectively map the taint flow from untrusted entry points to dangerous execution sinks, we need to identify the following components:
+
+- **Untrusted Entry Points**: These are the sources of user input that can be manipulated by an attacker. In the provided code, the entry point is the `user_input` variable, which captures input from the user.
+
+- **Tainted Data Propagation**: The tainted data (in this case, `patient_id`) is passed through the function and concatenated into a SQL query string. We need to track how this data flows through the function.
+
+- **Dangerous Execution Sinks**: These are the points in the code where the tainted data is used in a way that can lead to security vulnerabilities. In this example, the dangerous sink is the `cursor.execute(query)` call, where the SQL query is executed.
+
+**Taint Flow Mapping**:
+- `user_input` (untrusted) → `get_patient_record(patient_id)` → `query` (tainted) → `cursor.execute(query)` (sink)
+
+#### 2. Modern API Intelligence
+
+In addition to the SQLite library used in the example, we should consider other modern Python database libraries that may also be vulnerable to CWE-532. Here are some common libraries and their potential sinks:
+
+- **SQLAlchemy**: 
+  - Sink: `session.execute(query)`
+  - Sink: `session.query(Model).filter(condition).all()`
+
+- **Django ORM**:
+  - Sink: `Model.objects.raw(query)`
+  - Sink: `Model.objects.filter(condition)`
+
+- **Psycopg2** (PostgreSQL):
+  - Sink: `cursor.execute(query)`
+
+**Potential Sanitizers**:
+- Use parameterized queries or prepared statements to sanitize inputs.
+- Use ORM methods that automatically handle input sanitization (e.g., `filter()` in Django ORM).
+- Implement input validation functions to ensure that inputs conform to expected formats.
+
+#### 3. Precision Mapping
+
+To avoid compilation errors and ensure precision in our CodeQL query, we need to clearly distinguish between AST elements. Here are the key AST elements to focus on:
+
+- **Function Call Nodes**: Identify function calls that represent user input (e.g., `input()`) and database execution (e.g., `execute()`).
+- **String Concatenation Nodes**: Identify where user input is concatenated into SQL queries.
+- **Variable Assignment Nodes**: Track the assignment of user input to variables that are later used in SQL queries.
+
+#### 4. Use Structural AST Details
+
+To effectively capture the necessary elements in the AST, we can define the following structural details:
+
+- **Source Node**: Identify the `input()` function call as the source of untrusted data.
+- **Tainted Variable Node**: Track the variable that holds the tainted data (e.g., `patient_id`).
+- **Sink Node**: Identify the `execute()` function call as the sink where the tainted data is used.
+
+#### 5. Modeling Pattern: Modular Configuration
+
+To create a modular configuration structure, we can define predicates for sources, sinks, and sanitizers as follows:
+
+```python
+def is_source(node):
+    return isinstance(node, FunctionCall) and node.name == "input"
+
+def is_sink(node):
+    return isinstance(node, FunctionCall) and (
+        node.name in ["execute", "session.execute", "Model.objects.raw"]
+    )
+
+def is_tainted_variable(node):
+    return isinstance(node, Variable) and node.name == "patient_id"
+
+def is_sanitizer(node):
+    return isinstance(node, FunctionCall) and (
+        node.name in ["execute", "filter", "raw"]
+    )
+```
+
+### Summary
+
+This Technical AST Detection Plan outlines a comprehensive approach to detecting insecure logging of sensitive information in Python applications. By deconstructing the taint flow, identifying modern API sinks, and providing a modular configuration for sources, sinks, and sanitizers, we can enhance the effectiveness of CodeQL queries in identifying vulnerabilities related to CWE-532.
+
+### Technical AST Detection Plan for CWE-209: Information Exposure through an Error Message
+
+#### 1. Deconstruct the Taint-Flow
+
+To effectively map the taint flow from untrusted entry points to dangerous execution sinks, we need to identify the following components:
+
+- **Sources**: Points where untrusted data enters the application.
+- **Sinks**: Points where this untrusted data can lead to vulnerabilities, such as error messages being returned to the user.
+- **Sanitizers**: Mechanisms that can be used to clean or validate the untrusted data before it reaches the sink.
+
+**Source Identification**:
+- `request.form.get("student_id", "")`: This is the entry point where user input is received. The `student_id` is untrusted data.
+
+**Taint Flow**:
+- The `student_id` is concatenated directly into the SQL query string, leading to a potential SQL injection vulnerability.
+- The error message returned in the `except` block (`return f"Error: {exc}", 500`) exposes sensitive information about the internal state of the application.
+
+**Sink Identification**:
+- The execution of the SQL query (`cursor.execute(query, (pin,))`) is a dangerous sink as it can lead to SQL injection.
+- The return statement in the exception block is another sink that exposes internal error messages.
+
+#### 2. Modern API Intelligence
+
+In addition to the provided code, we should consider other modern Python database libraries and their potential sinks:
+
+- **SQLAlchemy**: Using raw SQL queries or improperly parameterized queries can lead to similar vulnerabilities.
+- **Django ORM**: Directly using `raw()` queries without proper sanitization can expose the application to SQL injection.
+
+**Potential Sinks**:
+- `cursor.execute()`
+- `db.session.execute()` (for SQLAlchemy)
+- `Model.objects.raw()` (for Django ORM)
+
+**Potential Sanitizers**:
+- Use parameterized queries or prepared statements to prevent SQL injection.
+- Implement input validation and sanitization functions to clean user inputs.
+
+#### 3. Precision Mapping
+
+To avoid compilation errors, we need to clearly distinguish between AST elements. Here’s how we can map the relevant components:
+
+- **Source**: 
+  - `request.form.get("student_id", "")` → `ASTNode: Call`
+  
+- **Sink**:
+  - `cursor.execute(query, (pin,))` → `ASTNode: Call`
+  - `return f"Error: {exc}", 500` → `ASTNode: Return`
+
+- **Sanitizer**:
+  - `parameterized_query_function(student_id)` → `ASTNode: Call`
+
+#### 4. Use Structural AST Details
+
+To create a robust CodeQL query, we need to focus on the structural details of the AST. Here’s how we can represent the components:
+
+- **Source Node**:
   ```python
-  def is_source(node):
-      return isinstance(node, Call) and (
-          node.func == "get" and isinstance(node.value, Attribute) and node.value.attr in ["args", "form"]
-          or node.func == "input"
-      )
+  source_node = Call(func=Attribute(value=Name(id='request'), attr='form'), args=[Constant(value='student_id'), Constant(value='')])
   ```
 
-- **Sink Predicate**:
+- **Sink Node**:
   ```python
-  def is_sink(node):
-      return isinstance(node, Call) and (
-          node.func == "execute" or node.func == "execute" and isinstance(node.value, Attribute) and node.value.attr in ["cursor", "session"]
-      )
+  sink_node = Call(func=Attribute(value=Name(id='cursor'), attr='execute'), args=[BinaryOp(left=Constant(value="SELECT * FROM students WHERE student_id = '"), op=Add(), right=Name(id='student_id'))])
   ```
 
-- **Sanitizer Predicate**:
+- **Sanitizer Node**:
   ```python
-  def is_sanitizer(node):
-      return isinstance(node, Call) and (
-          node.func in ["int", "float"] or
-          (isinstance(node.value, Attribute) and node.value.attr in ["filter", "get"])
-      )
+  sanitizer_node = Call(func=Name(id='parameterized_query_function'), args=[Name(id='student_id')])
   ```
 
-- **ConfigSig Implementation**:
-  ```python
-  def config_sig(source, sink, sanitizer):
-      # Track the flow of data from source to sink, applying sanitizers as needed
-      if is_source(source):
-          # Mark as tainted
-          tainted_data = source
-      if is_sanitizer(sanitizer):
-          # Clean the tainted data
-          tainted_data = None
-      if is_sink(sink) and tainted_data:
-          # Report vulnerability
-          report_vulnerability(tainted_data, sink)
-  ```
+#### 5. Modeling Pattern: Modular Configuration
 
-This structured approach will enhance the detection of SQL injection vulnerabilities in Python applications, ensuring that we can identify and mitigate risks effectively.
+To create a modular configuration structure, we can define predicates for sources, sinks, and sanitizers:
+
+```python
+def is_source(node):
+    return isinstance(node, Call) and node.func == 'request.form.get'
+
+def is_sink(node):
+    return isinstance(node, Call) and node.func in ['cursor.execute', 'db.session.execute', 'Model.objects.raw']
+
+def is_sanitizer(node):
+    return isinstance(node, Call) and node.func == 'parameterized_query_function'
+```
+
+### Summary
+
+This Technical AST Detection Plan outlines a comprehensive approach to detecting CWE-209 vulnerabilities in Python applications. By deconstructing the taint flow, identifying modern API sinks, and providing a modular configuration for sources, sinks, and sanitizers, we can enhance the predictive capabilities of CodeQL queries to effectively mitigate information exposure through error messages.

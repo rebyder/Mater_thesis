@@ -92,7 +92,11 @@ class OrchestratorAgent:
         Returns:
             str: final_message of the CreatorAgent
         """
-        
+        # self.memory = SharedMemory()
+        # self.analyzer.shared_memory = self.memory
+        # self.suggestor.shared_memory = self.memory
+        # self.creator.shared_memory = self.memory
+            
         print("="*40)
         print("WORKFLOW START")
         print("="*40)
@@ -109,11 +113,9 @@ class OrchestratorAgent:
 
             print("[Orchestrator]: I call the Analyzer")
             structured_report = self.analyzer.run_analysis(analyzer_input)
-
             report = json.loads(structured_report)
 
-            structured_report = json.dumps(report, indent=2)
-            print(f"\nOutput Analyzer - enriched report with agent validation included:\n {structured_report}")
+            structured_report = json.dumps(report, indent=2)           
 
             print("[Orchestrator]: I call the Suggestor")
             suggestor_input = SuggestorInput(report_content=structured_report)

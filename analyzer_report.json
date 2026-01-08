@@ -10,9 +10,9 @@
         "full_file": "\"\"\"\nExample 1 \u2013 Simple WHERE-clause SQL injection (University student portal)\n\nThis Flask endpoint checks student login credentials against a MySQL database.\nIt is vulnerable because it directly interpolates the `student_id` into the\nWHERE clause of the SQL query using string concatenation.\n\"\"\"\n\nimport pymysql\nfrom flask import Flask, request, session\n\napp = Flask(__name__)\napp.secret_key = \"dev-secret-key\"\n\n\n@app.route(\"/student/login\", methods=[\"POST\"])\ndef student_login():\n    \"\"\"Authenticate a student by ID and PIN.\n\n    SQL injection vulnerability:\n    - `student_id` from the request is concatenated directly into the SQL string.\n    - An attacker can inject arbitrary SQL into the WHERE clause.\n    \"\"\"\n    db = None\n    try:\n        student_id = request.form.get(\"student_id\", \"\")\n        pin = request.form.get(\"pin\", \"\")\n\n        db = pymysql.connect(\n            host=\"localhost\", user=\"root\", passwd=\"\", db=\"university\"\n        )\n        cursor = db.cursor()\n\n        # VULNERABLE: untrusted student_id concatenated into the query\n        query = (\n            \"SELECT * FROM students \"\n            \"WHERE student_id = '\" + student_id + \"' AND pin = %s\"\n        )\n\n        cursor.execute(query, (pin,))\n        row = cursor.fetchone()\n\n        if row:\n            session[\"student_id\"] = student_id\n            return \"Student login successful\"\n        else:\n            return \"Invalid student ID or PIN\", 401\n\n    except Exception as exc:\n        return f\"Error: {exc}\", 500\n    finally:\n        if db is not None:\n            db.close()\n"
       }
     ],
-    "cwe": "CWE-203",
-    "cwe_description": "Exposure of Sensitive Information to an Unauthorized Actor",
-    "agent_validation": "The analysis of the provided code confirms that it contains a SQL injection vulnerability due to the direct concatenation of the `student_id` into the SQL query. This can lead to exposure of sensitive information, which aligns with the CodeQL finding of potential stack trace exposure. Therefore, I classify this finding as a True Positive and will update the JSON accordingly."
+    "cwe": "CWE-209",
+    "cwe_description": "Exposure of Sensitive Information to an Unauthorized Actor through Stack Trace.",
+    "agent_validation": "The analysis of the provided code confirms that the CodeQL finding regarding stack trace exposure is a True Positive. The code directly returns the exception message in the response, which can expose sensitive information about the application's internal state. This aligns with the CWE-209 classification, indicating a vulnerability that should be addressed to prevent potential information leakage."
   },
   {
     "tool": "CodeQL",
@@ -27,7 +27,7 @@
     ],
     "cwe": "CWE-89",
     "cwe_description": "Improper neutralization of special elements used in an SQL command ('SQL Injection').",
-    "agent_validation": "The analysis of the provided code confirms that it contains a SQL injection vulnerability due to the direct insertion of the `ids` parameter into the SQL query's IN clause without proper sanitization or parameterization. This allows attackers to inject arbitrary SQL, confirming the CodeQL finding of a potential SQL injection vulnerability. Therefore, I classify this finding as a True Positive and will update the JSON accordingly."
+    "agent_validation": "The analysis of the provided code confirms that the CodeQL finding regarding SQL injection is a True Positive. The code directly interpolates the `ids` parameter into the SQL query's IN clause without any validation or parameterization, which allows for SQL injection attacks. This aligns with the CWE-89 classification for SQL Injection vulnerabilities, confirming that the CodeQL finding is a True Positive."
   },
   {
     "tool": "CodeQL",
@@ -41,8 +41,8 @@
       }
     ],
     "cwe": "CWE-89",
-    "cwe_description": "Improper neutralization of special elements used in an SQL command ('SQL Injection').",
-    "agent_validation": "The analysis of the provided code confirms that it contains a SQL injection vulnerability due to the concatenation of user-provided `start` and `end` parameters into the SQL query without proper sanitization or parameterization. This allows attackers to inject arbitrary SQL, confirming the CodeQL finding of a potential SQL injection vulnerability. Therefore, I classify this finding as a True Positive and will update the JSON accordingly."
+    "cwe_description": "SQL Injection occurs when an application includes untrusted data in a SQL query without proper validation or escaping.",
+    "agent_validation": "The analysis of the provided code confirms that the CodeQL finding regarding SQL injection is a True Positive. The code concatenates user-provided `start` and `end` values directly into the SQL query without any validation or parameterization, which allows for SQL injection attacks. This aligns with the CWE-89 classification for SQL Injection vulnerabilities, confirming that the CodeQL finding is a True Positive."
   },
   {
     "tool": "CodeQL",
@@ -57,7 +57,7 @@
     ],
     "cwe": "CWE-89",
     "cwe_description": "Improper neutralization of special elements used in an SQL command ('SQL Injection').",
-    "agent_validation": "The analysis of the provided code confirms that it contains a SQL injection vulnerability due to the direct interpolation of the `student_id` into the SQL query's WHERE clause using string concatenation. This allows attackers to inject arbitrary SQL, confirming the CodeQL finding of a potential SQL injection vulnerability. Therefore, I classify this finding as a True Positive and will update the JSON accordingly."
+    "agent_validation": "The analysis of the provided code confirms that the CodeQL finding regarding SQL injection is a True Positive. The code directly interpolates the `student_id` from user input into the SQL query's WHERE clause without any validation or parameterization, which allows for SQL injection attacks. This aligns with the CWE-89 classification for SQL Injection vulnerabilities, confirming that the CodeQL finding is a True Positive."
   },
   {
     "tool": "CodeQL",
@@ -72,7 +72,7 @@
     ],
     "cwe": "CWE-89",
     "cwe_description": "Improper neutralization of special elements used in an SQL command ('SQL Injection').",
-    "agent_validation": "The analysis of the provided code confirms that it contains a SQL injection vulnerability due to the direct interpolation of the `q` parameter into the SQL query using f-strings without proper sanitization or parameterization. This allows attackers to inject arbitrary SQL, confirming the CodeQL finding of a potential SQL injection vulnerability. Therefore, I classify this finding as a True Positive and will update the JSON accordingly."
+    "agent_validation": "The analysis of the provided code confirms that the CodeQL finding regarding SQL injection is a True Positive. The code directly interpolates the `q` parameter from user input into the SQL query's WHERE clause using f-strings without any validation or parameterization, which allows for SQL injection attacks. This aligns with the CWE-89 classification for SQL Injection vulnerabilities, confirming that the CodeQL finding is a True Positive."
   },
   {
     "tool": "CodeQL",
@@ -86,8 +86,8 @@
       }
     ],
     "cwe": "CWE-89",
-    "cwe_description": "Improper neutralization of special elements used in an SQL command ('SQL Injection').",
-    "agent_validation": "The analysis of the provided code confirms that it contains a SQL injection vulnerability due to the direct interpolation of the `sort` parameter into the SQL query's ORDER BY clause without proper sanitization or parameterization. This allows attackers to inject arbitrary SQL fragments, confirming the CodeQL finding of a potential SQL injection vulnerability. Therefore, I classify this finding as a True Positive and will update the JSON accordingly."
+    "cwe_description": "SQL Injection occurs when an application includes untrusted data in a SQL query without proper validation or escaping.",
+    "agent_validation": "The analysis of the provided code confirms that the CodeQL finding regarding SQL injection is a True Positive. The code directly interpolates the `sort` parameter from user input into the SQL query's ORDER BY clause using f-strings without any validation or parameterization, which allows for SQL injection attacks. This aligns with the CWE-89 classification for SQL Injection vulnerabilities, confirming that the CodeQL finding is a True Positive."
   },
   {
     "tool": "CodeQL",
@@ -102,7 +102,7 @@
     ],
     "cwe": "CWE-89",
     "cwe_description": "Improper neutralization of special elements used in an SQL command ('SQL Injection').",
-    "agent_validation": "The analysis of the provided code confirms that it contains a SQL injection vulnerability due to the direct concatenation of the `page` and `page_size` parameters into the SQL query's LIMIT/OFFSET clause without proper sanitization or parameterization. This allows attackers to inject arbitrary SQL or manipulate the query, confirming the CodeQL finding of a potential SQL injection vulnerability. Therefore, I classify this finding as a True Positive and will update the JSON accordingly."
+    "agent_validation": "The analysis of the provided code confirms that the CodeQL finding regarding SQL injection is a True Positive. The code concatenates the `page` and `page_size` parameters directly into the SQL query's LIMIT and OFFSET clauses without any validation or parameterization, which allows for SQL injection attacks. This aligns with the CWE-89 classification for SQL Injection vulnerabilities, confirming that the CodeQL finding is a True Positive."
   },
   {
     "tool": "CodeQL",
@@ -117,7 +117,7 @@
     ],
     "cwe": "CWE-89",
     "cwe_description": "Improper neutralization of special elements used in an SQL command ('SQL Injection').",
-    "agent_validation": "The analysis of the provided code confirms that it contains a SQL injection vulnerability due to the direct interpolation of the `dataset` parameter into the SQL query's FROM clause without proper sanitization or parameterization. This allows attackers to choose arbitrary tables or inject further SQL, confirming the CodeQL finding of a potential SQL injection vulnerability. Therefore, I classify this finding as a True Positive and will update the JSON accordingly."
+    "agent_validation": "The analysis of the provided code confirms that the CodeQL finding regarding SQL injection is a True Positive. The code directly interpolates the `dataset` parameter from user input into the SQL query's FROM clause without any validation or parameterization, which allows for SQL injection attacks. This aligns with the CWE-89 classification for SQL Injection vulnerabilities, confirming that the CodeQL finding is a True Positive."
   },
   {
     "tool": "CodeQL",
@@ -132,7 +132,7 @@
     ],
     "cwe": "CWE-89",
     "cwe_description": "Improper neutralization of special elements used in an SQL command ('SQL Injection').",
-    "agent_validation": "The analysis of the provided code confirms that it contains a SQL injection vulnerability due to the direct interpolation of the `account` parameter into the stored procedure call without proper sanitization or parameterization. This allows attackers to inject extra arguments or terminate the call and append SQL, confirming the CodeQL finding of a potential SQL injection vulnerability. Therefore, I classify this finding as a True Positive and will update the JSON accordingly."
+    "agent_validation": "The analysis of the provided code confirms that the CodeQL finding regarding SQL injection is a True Positive. The code directly interpolates the `account` parameter from user input into the SQL CALL statement without any validation or parameterization, which allows for SQL injection attacks. This aligns with the CWE-89 classification for SQL Injection vulnerabilities, confirming that the CodeQL finding is a True Positive."
   },
   {
     "tool": "CodeQL",
@@ -147,7 +147,7 @@
     ],
     "cwe": "CWE-532",
     "cwe_description": "Insecure logging of sensitive information such as passwords, credit card numbers, or personal data.",
-    "agent_validation": "The analysis of the provided code confirms that it contains a vulnerability related to logging sensitive data as clear text, specifically the `patient_id` which is printed in the debug statement. This can expose sensitive information if the logs are accessed by unauthorized users, confirming the CodeQL finding of potential clear-text logging of sensitive data. Therefore, I classify this finding as a True Positive and will update the JSON accordingly."
+    "agent_validation": "The analysis of the provided code confirms that the CodeQL finding regarding clear-text logging of sensitive data is a True Positive. The code logs the SQL query, which includes the `patient_id` directly from user input, as clear text. This can expose sensitive information about patient records in the logs, which aligns with the CWE-532 classification for insecure logging of sensitive data. Therefore, the CodeQL finding is a True Positive."
   },
   {
     "tool": "None",
@@ -162,7 +162,7 @@
     ],
     "cwe": "CWE-89",
     "cwe_description": "SQL Injection",
-    "agent_validation": "The analysis of the provided code confirms that it contains a SQL injection vulnerability due to the direct concatenation of the `product_id` into the SQL query without proper sanitization or parameterization. This allows attackers to exploit the query by appending additional SQL commands, such as `; DROP TABLE`, which confirms the existence of a vulnerability despite CodeQL not flagging it. Therefore, I classify this finding as a New Vulnerability and will update the JSON accordingly."
+    "agent_validation": "The analysis of the provided code confirms that there is a significant vulnerability present, despite CodeQL not flagging it. The code concatenates the `product_id` directly into the SQL query without any validation or parameterization, which allows for SQL injection attacks, particularly in the context of stacked queries. This can lead to arbitrary SQL execution, such as appending malicious commands like `; DROP TABLE`. Therefore, this code contains a serious vulnerability that needs to be addressed."
   },
   {
     "tool": "None",
@@ -177,7 +177,7 @@
     ],
     "cwe": "CWE-89",
     "cwe_description": "SQL Injection",
-    "agent_validation": "The analysis of the provided code confirms that it contains a second-order SQL injection vulnerability due to the direct concatenation of the `pattern` parameter into the SQL query's WHERE clause without proper sanitization or parameterization. This allows for the possibility of SQL injection when the `pattern` is derived from user input stored earlier, confirming the existence of a vulnerability despite CodeQL not flagging it. Therefore, I classify this finding as a New Vulnerability and will update the JSON accordingly."
+    "agent_validation": "The analysis of the provided code confirms that there is a significant vulnerability present, despite CodeQL not flagging it. The code demonstrates a second-order SQL injection vulnerability. The `raw_comment` is stored in the database without validation, and later, the `pattern` used in the `moderate_comments` function is concatenated directly into the SQL query. This allows for potential SQL injection attacks when a malicious comment is stored and then searched. Therefore, this code contains a serious vulnerability that needs to be addressed."
   },
   {
     "tool": "None",
@@ -192,7 +192,7 @@
     ],
     "cwe": "CWE-89",
     "cwe_description": "SQL Injection",
-    "agent_validation": "The analysis of the provided code confirms that it contains a SQL injection vulnerability due to the direct concatenation of the `q` parameter into the SQL query's LIKE clause without proper sanitization or parameterization. This allows attackers to manipulate the query by injecting SQL code, confirming the existence of a vulnerability despite CodeQL not flagging it. Therefore, I classify this finding as a New Vulnerability and will update the JSON accordingly."
+    "agent_validation": "The analysis of the provided code confirms that there is a significant vulnerability present, despite CodeQL not flagging it. The code demonstrates a SQL injection vulnerability due to the direct concatenation of the `q` parameter into the SQL query's LIKE clause without any escaping or parameterization. This allows an attacker to manipulate the search string, potentially leading to unauthorized data access or modification. Therefore, this code contains a serious vulnerability that needs to be addressed."
   },
   {
     "tool": "None",
@@ -207,7 +207,7 @@
     ],
     "cwe": "CWE-89",
     "cwe_description": "SQL Injection",
-    "agent_validation": "The analysis of the provided code confirms that it contains a SQL injection vulnerability due to the direct concatenation of the `table_name` parameter into the SQL DDL statements without proper sanitization or parameterization. This allows attackers to inject additional DDL or target arbitrary tables, confirming the existence of a vulnerability despite CodeQL not flagging it. Therefore, I classify this finding as a New Vulnerability and will update the JSON accordingly."
+    "agent_validation": "The analysis of the provided code confirms that there is a significant vulnerability present, despite CodeQL not flagging it. The code demonstrates a SQL injection vulnerability because the `table_name` parameter is directly concatenated into the DDL statements without any validation or sanitization. This allows an attacker to manipulate the input and execute arbitrary SQL commands, such as dropping or truncating unintended tables. Therefore, this code contains a serious vulnerability that needs to be addressed."
   },
   {
     "tool": "None",
@@ -222,7 +222,7 @@
     ],
     "cwe": "CWE-89",
     "cwe_description": "SQL Injection",
-    "agent_validation": "The analysis of the provided code confirms that it contains a SQL injection vulnerability due to the direct concatenation of the `ref` parameter into the raw SQL query without proper sanitization or parameterization. This allows attackers to manipulate the SQL query, confirming the existence of a vulnerability despite CodeQL not flagging it. Therefore, I classify this finding as a New Vulnerability and will update the JSON accordingly."
+    "agent_validation": "The analysis of the provided code confirms that there is a significant vulnerability present, despite CodeQL not flagging it. The code demonstrates a SQL injection vulnerability because the `ref` parameter from user input is directly concatenated into the raw SQL query without any validation or sanitization. This allows an attacker to manipulate the input and execute arbitrary SQL commands, which can lead to unauthorized data access or modification. Therefore, this code contains a serious vulnerability that needs to be addressed."
   },
   {
     "tool": "None",
@@ -237,6 +237,6 @@
     ],
     "cwe": "CWE-89",
     "cwe_description": "SQL Injection",
-    "agent_validation": "The analysis of the provided code confirms that it contains a SQL injection vulnerability due to the direct concatenation of the `level` parameter into the SQL query's WHERE clause without proper sanitization or parameterization. This allows attackers to inject arbitrary SQL into the COPY statement, confirming the existence of a vulnerability despite CodeQL not flagging it. Therefore, I classify this finding as a New Vulnerability and will update the JSON accordingly."
+    "agent_validation": "The analysis of the provided code confirms that there is a significant vulnerability present, despite CodeQL not flagging it. The code demonstrates a SQL injection vulnerability because the `level` parameter from user input is directly concatenated into the SQL query's WHERE clause without any validation or sanitization. This allows an attacker to manipulate the input and execute arbitrary SQL commands, which can lead to unauthorized data access or modification. Therefore, this code contains a serious vulnerability that needs to be addressed."
   }
 ]

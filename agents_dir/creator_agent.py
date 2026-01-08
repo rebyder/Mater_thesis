@@ -102,6 +102,7 @@ class CreatorAgent(BaseAgent):
         self.max_steps = 20
         
         self.all_cwes : Set[str] = set()
+        self.max_trials ={}
         self.processed_cwes : Set[str] = set()
 
 
@@ -127,13 +128,30 @@ class CreatorAgent(BaseAgent):
             target_cwes = self.shared_memory.get_data("target_cwes", []) 
             self.all_cwes = set(target_cwes)  
             self.processed_cwes.clear()
+            self.pending_cwes = set()
 
             self.last_step.observation = (
                 f"NEW task: generate CodeQL queries for the following CWEs: {', '.join(self.all_cwes)}. "
-                f"Report: {self.report}."
+                f"Use the report {self.report} as guidelines."
             )
             
-              
+    def summarize(self, query: str, text: str) -> str:
+        if len(text)< 1000:
+            return text
+
+        summary_prompt = f"""
+        Analyze the following web search result for the query: "{query}".
+        Extracr only the relevantiinfomrations like:
+        - the CodeQL classes, predicates or library names mentioned.
+        - specific AST elements (Sources, Sinks).
+        - code snippets or logic patterns for TainTracking.
+        Discard all navigation menus, ads and irrelevant prose.
+        Result to summarize: {text[:8000]}
+        """
+
+        response = self.llm.invoke(summary_prompt)
+        return f"Compressed web search result: {response.content}"
+    
     def step(self, observation: str) -> ReActChain:
         """
         Executes a single reasoning-action step using the ReAct pattern.
@@ -155,10 +173,14 @@ class CreatorAgent(BaseAgent):
         scratchpad = self.shared_memory.to_messages()
         processed_cwes_str = ", ".join(self.processed_cwes)
         all_cwes_str = ", ".join(self.all_cwes)
-
+        report = self.report
+        pending_cwes_str = ", ".join(self.pending_cwes)
+        
         instructions = SYSTEM_QUERY_CREATOR.format(
-            processed_cwes=processed_cwes_str,
-            all_cwes=all_cwes_str 
+            all_cwes = all_cwes_str,
+            report = report,
+            processed_cwes = processed_cwes_str,
+            pending_cwes = pending_cwes_str
         )
 
         summary_out = self.summ_procedure.run(instructions, scratchpad)
@@ -191,7 +213,8 @@ class CreatorAgent(BaseAgent):
         """
 
         available_tools = {tool.__name__: tool for tool in self.tools}
-        last_observation = self.last_step.observation
+        last_observation = f"The report from the Suggestor has been successfully generated. Now I must generate as queries as necessary following the instruction in the report {self.report}. You MUST start from the CWE-89."
+        
 
         print("[Creator]: ")
         for step in range(self.max_steps):
@@ -216,20 +239,54 @@ class CreatorAgent(BaseAgent):
 
             if action_name in available_tools:
                 try:
+
                     result = available_tools[action_name](**current_action.dict()).run(self.llm)
-                    if "ERROR" in result:
-                        last_observation = f"The query failed (Exit 2). Error details: {result}. You MUST now use WebSearchTool to find a valid CodeQL Python at this web site `https://codeql.github.com/docs/writing-codeql-queries/`." 
-                    else:
-                        if hasattr(current_action, "cwe"):
-                            self.processed_cwes.add(current_action.cwe)
+                    current_cwe = getattr(current_action, "cwe", None)
+                   
+
+                    if action_name == "WriteQuerySubAgent":
+                        if "ERROR" in result:
+                            if current_cwe:
+                                self.max_trials[current_cwe] = self.max_trials.get(current_cwe, 0)+1
+                                if self.max_trials[current_cwe] >= 3:
+                                    self.processed_cwes.add(current_cwe)
+                                    self.pending_cwes = self.all_cwes - self.processed_cwes
+                                    if self.pending_cwes:
+                                        last_observation = (f"CWE {current_cwe} failed 3 times."
+                                                            f"You MUST NOT generate a query for {current_cwe} anymore. You MUST pick the next cwe in {self.pending_cwes} to generate a new query using the section of the {self.report} related to that CWE as guideline.")
+                                        self.last_step.action = current_action
+                                    else:
+                                        last_observation = f"You MUST call 'FinishTool'"
+                                        self.last_step.action = current_action
+                                else:
+                                    last_observation = f"The query failed (Exit 2) (attempt {self.max_trials[current_cwe]}/3). Error details: {result}. You MUST NOT start the query with '```ql'.  You MUST now use WebSearchTool to find a valid CodeQL Python at this web site `https://codeql.github.com/docs/writing-codeql-queries/` and then try again to genereate the query for {current_cwe} with the new insights." 
+                                    self.last_step.action = current_action
+                        else:
+                            if current_cwe:
+                                self.processed_cwes.add(current_cwe)
+                            last_observation = result
+                            self.last_step.action = current_action
+                    
+                    if action_name == "WebSearchTool":
+                        #query = getattr(current_action, 'query', 'CodeQL research')
+                        #summary_text = self.summarize(query, str(result))
+                        #last_observation = f"\nResult summarized: {summary_text}"
                         last_observation = result
+                        self.last_step.action = current_action
+                        #self.update_memory(last_observation)
+                    # else:
+                    #     last_observation = result
 
                 except Exception as e:
                     last_observation = f"Error during {action_name}: {e}"
+                    self.last_step.action =  current_action
                     print(last_observation)
 
             print(f"Step {step} - Action: {action_name} - Result: {result}\n")
-            self.last_step.observation = result
+            #self.last_step.observation = result
+            self.last_step.observation = last_observation
+            self.last_step.action = current_action
+            print(f"Last observation {last_observation}")
             self.update_memory(self.last_step.observation)
 
         raise TimeoutError(f"Creator exceeded max steps ({self.max_steps})")
